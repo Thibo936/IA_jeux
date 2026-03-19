@@ -117,7 +117,11 @@ def main():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         device = torch.device(args.device)
-    print(f"Device : {device}")
+    if device.type == "cuda":
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"Device : {device} ({gpu_name})")
+    else:
+        print(f"Device : {device}")
 
     # ─── Réseau ───────────────────────────────────────────────────────────────
     net = HexNet().to(device)

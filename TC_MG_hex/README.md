@@ -109,10 +109,21 @@ Pipeline complet implémenté dans le répertoire `alphazero/`. Les modules s'im
 pip install torch numpy
 ```
 
-Avec GPU NVIDIA :
+Avec GPU NVIDIA (CUDA) :
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cu118
 ```
+
+Avec GPU AMD (ROCm) :
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+```
+
+> **Note RX 6600 / gfx1032** : ce GPU nécessite un override pour être reconnu par PyTorch ROCm :
+> ```bash
+> export HSA_OVERRIDE_GFX_VERSION=10.3.0
+> ```
+> Ajouter cette ligne dans `~/.bashrc` pour la rendre permanente.
 
 ---
 
