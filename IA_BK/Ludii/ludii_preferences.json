@@ -94,7 +94,7 @@
     "MenuNames_0": "Human",
     "MenuNames_1": "From JAR",
     "testLudeme2": "",
-    "MenuNames_2": "Ludii AI",
+    "MenuNames_2": "From JAR",
     "testLudeme3": "",
     "MenuNames_3": "Human",
     "MenuNames_4": "Human",
@@ -127,10 +127,14 @@
     "drawPerimeterCells": false,
     "AI_1": {"AI": {
         "Class Name": "bk.TC_MG_mcts",
-        "JAR File": "/home/thibo/Bureau/TC_MG_breakthrough/Ludii/TC_MG_mcts.jar",
+        "JAR File": "/home/thibo/repo-projet/IA_jeux/IA_BK/Ludii/TC_MG_mcts.jar",
         "algorithm": "From JAR"
     }},
-    "AI_2": {"AI": {"algorithm": "Ludii AI"}},
+    "AI_2": {"AI": {
+        "Class Name": "bk.TC_MG_alphabeta_player",
+        "JAR File": "/home/thibo/repo-projet/IA_jeux/IA_BK/Ludii/TC_MG_alphabeta_player.jar",
+        "algorithm": "From JAR"
+    }},
     "ShowLastMove": false,
     "NoRepetitionWithinTurn": false,
     "drawCornersVertices": false,
@@ -152,7 +156,7 @@
     "FrameLocX": 132,
     "AnimationVisualsType": "None",
     "FrameLocY": 64,
-    "LastSelectedJarFile": "/home/thibo/Bureau/TC_MG_breakthrough/Ludii/TC_MG_mcts.jar",
+    "LastSelectedJarFile": "/home/thibo/repo-projet/IA_jeux/IA_BK/Ludii/TC_MG_alphabeta_player.jar",
     "networkRefresh": false,
     "editorParseText": true,
     "TickLength": 0.1,
