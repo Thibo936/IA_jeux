@@ -164,6 +164,10 @@ def main():
 
         if len(buffer) < args.batch:
             print(f"  Buffer trop petit ({len(buffer)} < {args.batch}), on attend la prochaine itération.")
+            # Sauvegarde quand même pour ne pas perdre les données self-play accumulées
+            save_checkpoint(net, os.path.join(CHECKPOINT_DIR, f"model_iter_{iteration:04d}.pt"))
+            if not os.path.isfile(BEST_MODEL_FILE):
+                save_checkpoint(net, BEST_MODEL_FILE)
             continue
 
         # 2. Entraînement
