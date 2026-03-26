@@ -115,11 +115,25 @@ def main():
     # ─── Device ───────────────────────────────────────────────────────────────
     if args.device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    elif args.device == "cuda" and not torch.cuda.is_available():
+        hip_version = getattr(torch.version, "hip", None)
+        if hip_version:
+            raise SystemExit(
+                "Erreur : PyTorch ROCm est installé, mais aucun GPU n'est détecté. "
+                "Vérifie l'installation ROCm et les variables d'environnement GPU."
+            )
+        raise SystemExit(
+            "Erreur : aucun GPU CUDA/ROCm n'est disponible. "
+            "Installe une version PyTorch compatible GPU ou lance avec --device cpu."
+        )
     else:
         device = torch.device(args.device)
     if device.type == "cuda":
-        gpu_name = torch.cuda.get_device_name(0)
-        print(f"Device : {device} ({gpu_name})")
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            print(f"Device : {device} ({gpu_name})")
+        else:
+            print(f"Device : {device}")
     else:
         print(f"Device : {device}")
 

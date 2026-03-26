@@ -21,7 +21,7 @@ from config import BOARD_SIZE, NUM_CELLS
 # - 30–60 coups : profondeur 2 (~200ms avec ordonnancement)
 # - < 30 coups (fin de partie) : profondeur 3
 # L'ordonnancement des coups à la racine améliore drastiquement les coupures.
-MAX_DEPTH  = 1
+MAX_DEPTH  = 6
 SCORE_WIN  =  100_000
 SCORE_LOSE = -100_000
 
