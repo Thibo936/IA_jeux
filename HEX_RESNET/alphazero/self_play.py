@@ -35,6 +35,30 @@ class ReplayBuffer:
         values   = np.array([self._values[i]   for i in idx], dtype=np.float32)
         return states, policies, values
 
+    def save(self, path: str) -> None:
+        """Sauvegarde le buffer sur disque."""
+        if len(self) == 0:
+            return
+        np.savez_compressed(
+            path,
+            states=np.stack(list(self._states)),
+            policies=np.stack(list(self._policies)),
+            values=np.array(list(self._values), dtype=np.float32),
+        )
+
+    def load(self, path: str) -> int:
+        """Charge le buffer depuis le disque. Retourne le nombre d'exemples chargés."""
+        import os
+        if not os.path.isfile(path):
+            return 0
+        data = np.load(path)
+        states, policies, values = data['states'], data['policies'], data['values']
+        count = 0
+        for i in range(len(states)):
+            self.add(states[i], policies[i], float(values[i]))
+            count += 1
+        return count
+
 
 def _augment(state: np.ndarray, policy: np.ndarray, value: float):
     """
@@ -45,9 +69,11 @@ def _augment(state: np.ndarray, policy: np.ndarray, value: float):
     - on échange les plans Blue (0) et Red (1)
     - on remet le plan joueur courant à jour (inversé)
     - on retourne la politique (121 coups) réindexée
-    - la valeur est inversée (l'adversaire gagne ↔ on perd)
+    - la valeur est CONSERVÉE (la symétrie échange totalement les rôles :
+      si la position était gagnante pour le joueur courant, elle l'est
+      toujours après transformation pour le nouveau joueur courant)
 
-    Retourne (state_aug, policy_aug, value_aug).
+    Retourne (state_aug, policy_aug, value).
     """
     # state : (3, 11, 11)
     state_aug = np.zeros_like(state)
@@ -62,7 +88,7 @@ def _augment(state: np.ndarray, policy: np.ndarray, value: float):
         j = c * 11 + r                 # indice transposé
         policy_aug[j] = policy[i]
 
-    return state_aug, policy_aug, -value  # valeur inversée
+    return state_aug, policy_aug, value  # valeur conservée (symétrie totale des rôles)
 
 
 def play_one_game(

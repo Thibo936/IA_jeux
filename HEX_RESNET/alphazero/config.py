@@ -23,10 +23,10 @@ REPLAY_BUFFER_SIZE  = 50_000  # taille du buffer circulaire (positions)
 
 # ─── Entraînement ─────────────────────────────────────────────────────────────
 BATCH_SIZE          = 512
-LEARNING_RATE       = 1e-3
+LEARNING_RATE       = 2e-4
 LR_SCHEDULER        = "cosine"
 WEIGHT_DECAY        = 1e-4
-TRAIN_STEPS         = 1000   # steps par itération
+TRAIN_STEPS         = 500    # steps par itération (limité pour éviter l'overfitting du buffer)
 
 # ─── Évaluation ───────────────────────────────────────────────────────────────
 EVAL_GAMES          = 40     # parties d'évaluation (20 par couleur)

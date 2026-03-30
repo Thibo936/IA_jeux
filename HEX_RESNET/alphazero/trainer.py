@@ -50,6 +50,7 @@ def train_step(
 
     optimizer.zero_grad()
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
     optimizer.step()
 
     return loss.item(), loss_value.item(), loss_policy.item()
@@ -143,12 +144,16 @@ def main():
         print("  Nouveau modèle initialisé (aucun checkpoint trouvé).")
 
     optimizer = torch.optim.Adam(net.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.iterations)
 
     # ─── Buffer ───────────────────────────────────────────────────────────────
     buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
+    buffer_path = os.path.join(CHECKPOINT_DIR, "replay_buffer.npz")
 
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+    n_loaded = buffer.load(buffer_path)
+    if n_loaded > 0:
+        print(f"  Buffer restauré : {n_loaded} exemples depuis {buffer_path}")
 
     # ─── Boucle principale AlphaZero ──────────────────────────────────────────
     for iteration in range(1, args.iterations + 1):
@@ -172,7 +177,7 @@ def main():
 
         # 2. Entraînement
         print(f"\n[2/3] Entraînement ({args.steps} steps, batch={args.batch})...")
-        metrics = train_epoch(net, optimizer, scheduler, buffer, args.steps, args.batch, device)
+        metrics = train_epoch(net, optimizer, None, buffer, args.steps, args.batch, device)
         print(f"  Loss totale={metrics['loss']:.4f}  valeur={metrics['loss_value']:.4f}  politique={metrics['loss_policy']:.4f}")
 
         # Sauvegarde intermédiaire
@@ -197,6 +202,9 @@ def main():
                     print("  ✗ Ancien modèle conservé.")
                     # Recharger l'ancien meilleur pour continuer l'entraînement
                     load_checkpoint(net, BEST_MODEL_FILE, device)
+
+        # Sauvegarde du buffer
+        buffer.save(buffer_path)
 
         t1 = time.time()
         print(f"\n  Durée itération : {t1-t0:.1f}s")
