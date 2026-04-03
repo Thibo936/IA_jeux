@@ -106,11 +106,11 @@ class HexNet(nn.Module):
         import numpy as np
 
         self.eval()
-        with torch.no_grad():
+        with torch.no_grad(), torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
             t = torch.from_numpy(state_tensor).unsqueeze(0).to(device)  # (1,3,11,11)
             log_p, v = self(t)
-            log_p = log_p.squeeze(0).cpu().numpy()   # (121,)
-            value  = v.squeeze().item()
+            log_p = log_p.float().squeeze(0).cpu().numpy()   # (121,)
+            value  = v.float().squeeze().item()
 
         # Masquer les coups illégaux et renormaliser
         policy = np.exp(log_p)
@@ -124,6 +124,40 @@ class HexNet(nn.Module):
             policy /= policy.sum()
 
         return policy, value
+
+    def batch_predict(
+        self,
+        states: "np.ndarray",
+        legal_masks: "np.ndarray",
+        device: torch.device,
+    ) -> tuple["np.ndarray", "np.ndarray"]:
+        """
+        Inférence batchée (pas de gradient).
+
+        states      : numpy (B, 3, 11, 11)
+        legal_masks : numpy bool (B, 121)
+        Retourne (policies, values) :
+          policies : numpy float32 (B, 121)
+          values   : numpy float32 (B,)
+        """
+        import numpy as np
+
+        self.eval()
+        with torch.no_grad(), torch.amp.autocast(device.type, enabled=(device.type == "cuda")):
+            t = torch.from_numpy(states).to(device)
+            log_p, v = self(t)
+            log_p = log_p.float().cpu().numpy()   # (B, 121)
+            values = v.float().squeeze(1).cpu().numpy()  # (B,)
+
+        policies = np.exp(log_p)
+        masks = legal_masks.astype(np.float32)
+        policies *= masks
+        sums = policies.sum(axis=1, keepdims=True)
+        # Éviter division par zéro
+        safe = sums > 1e-8
+        policies = np.where(safe, policies / np.maximum(sums, 1e-8), masks / np.maximum(masks.sum(axis=1, keepdims=True), 1))
+
+        return policies, values
 
 
 # ─── Test rapide d'overfit ────────────────────────────────────────────────────

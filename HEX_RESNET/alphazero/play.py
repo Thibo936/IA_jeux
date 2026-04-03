@@ -28,13 +28,13 @@ from config import MCTS_SIMULATIONS, BEST_MODEL_FILE, NUM_CELLS
 def compute_sims(time_limit: float) -> int:
     """Adapte le nombre de simulations au temps alloué."""
     if time_limit <= 0.5:
-        return 100
-    elif time_limit <= 1.0:
         return 200
-    elif time_limit <= 2.0:
+    elif time_limit <= 1.0:
         return 400
-    else:
+    elif time_limit <= 2.0:
         return 800
+    else:
+        return 1600
 
 
 def load_best_model(device: torch.device) -> HexNet | None:
@@ -48,7 +48,12 @@ def load_best_model(device: torch.device) -> HexNet | None:
               file=sys.stderr)
         return None
     net = HexNet().to(device)
-    net.load_state_dict(torch.load(model_path, map_location=device))
+    try:
+        net.load_state_dict(torch.load(model_path, map_location=device))
+    except RuntimeError:
+        print(f"WARN: checkpoint incompatible ({model_path}), utilisation politique uniforme.",
+              file=sys.stderr)
+        return None
     net.eval()
     return net
 

@@ -1,10 +1,12 @@
 # self_play.py — Génération de parties en self-play pour AlphaZero Hex
 
+import sys
+import time
 import numpy as np
 from collections import deque
 
 from hex_env import HexEnv
-from mcts_az import MCTSAgent
+from mcts_az import MCTSAgent, MCTSNode
 from config import (
     REPLAY_BUFFER_SIZE, GAMES_PER_ITER, MCTS_SIMULATIONS, NUM_CELLS
 )
@@ -105,15 +107,23 @@ def play_one_game(
     env = HexEnv()
     history = []   # liste de (state_tensor, pi, blue_to_play)
     move_count = 0
+    reuse_root = None  # sous-arbre pour tree reuse
 
     while not env.is_terminal():
-        pi = agent.get_policy(env, move_count=move_count)
+        pi, root = agent.get_policy(env, move_count=move_count,
+                                     return_root=True, reuse_root=reuse_root)
 
         state = env.get_state_tensor()
         history.append((state.copy(), pi.copy(), env.blue_to_play))
 
         # Sélection du coup
         move = int(np.random.choice(NUM_CELLS, p=pi))
+
+        # Tree reuse : récupérer le sous-arbre du coup joué
+        if move in root.children:
+            reuse_root = root.children[move]
+        else:
+            reuse_root = None
         if verbose:
             r, c = divmod(move, 11)
             print(f"  Coup {move_count+1}: {chr(ord('A')+c)}{r+1} "
@@ -153,13 +163,31 @@ def run_self_play(
     Retourne les statistiques : {'blue_wins': int, 'red_wins': int, 'total': int}.
     """
     stats = {'blue_wins': 0, 'red_wins': 0, 'total': num_games}
+    t_start = time.time()
+    width = 25
+
     for i in range(num_games):
         winner = play_one_game(agent, buffer, augment=True, verbose=verbose)
         if winner == 'blue':
             stats['blue_wins'] += 1
         else:
             stats['red_wins'] += 1
-        if verbose or (i + 1) % 10 == 0:
-            print(f"  Partie {i+1}/{num_games} terminée | buffer={len(buffer)}")
 
+        done = i + 1
+        elapsed = time.time() - t_start
+        vitesse = done / elapsed if elapsed > 0 else 0
+        eta = (num_games - done) / vitesse if vitesse > 0 else 0
+        filled = int(width * done / num_games)
+        bar = '█' * filled + '░' * (width - filled)
+        sys.stdout.write(
+            f"\r  [{bar}] {done}/{num_games} | "
+            f"Blue:{stats['blue_wins']} Red:{stats['red_wins']} | "
+            f"{vitesse:.2f}p/s | écoulé:{elapsed:.0f}s ETA:{eta:.0f}s | "
+            f"buf:{len(buffer)}"
+        )
+        sys.stdout.flush()
+        if verbose:
+            sys.stdout.write('\n')
+
+    sys.stdout.write('\n')
     return stats

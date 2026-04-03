@@ -67,6 +67,19 @@ class HexEnv:
         self._winner = None
         self.blue_to_play = not self.blue_to_play
 
+    def undo_move(self, pos: int, was_blue: bool) -> None:
+        """
+        Annule un coup (pour AlphaBeta sans allocation).
+        `was_blue` : True si le coup avait été joué par Blue.
+        """
+        r, c = divmod(pos, BOARD_SIZE)
+        if was_blue:
+            self.blue[r, c] = False
+        else:
+            self.red[r, c] = False
+        self.blue_to_play = was_blue
+        self._winner = None
+
     # ─── Détection de victoire (BFS) ──────────────────────────────────────────
 
     def _blue_wins(self) -> bool:

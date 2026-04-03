@@ -25,6 +25,8 @@ pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
 
 > **Note RX 6600 / gfx1032** : ajouter `export HSA_OVERRIDE_GFX_VERSION=10.3.0` dans `~/.bashrc`.
 
+Dépendances optionnelles (notebook Colab) : `matplotlib`
+
 ---
 
 ## Démarrage rapide
@@ -94,6 +96,7 @@ Pipeline complet dans `alphazero/`. Lancer les scripts **depuis `alphazero/`**.
 
 ### Entraînement
 
+**Serveur local :**
 ```bash
 cd alphazero
 
@@ -101,7 +104,7 @@ cd alphazero
 python trainer.py --iterations 1 --games 10 --simulations 100
 
 # Entraînement standard (GPU recommandé)
-python trainer.py --iterations 50 --games 100 --simulations 400 --device cuda
+python trainer.py --iterations 100 --games 100 --simulations 800 --steps 500 --device cuda
 
 # Sans évaluation (plus rapide)
 python trainer.py --iterations 20 --games 50 --simulations 200 --no-eval
@@ -111,12 +114,19 @@ python trainer.py --iterations 20 --games 50 --simulations 200 --no-eval
 |---|---|---|
 | `--iterations` | 20 | Itérations AlphaZero |
 | `--games` | 100 | Parties de self-play par itération |
-| `--simulations` | 400 | Simulations MCTS par coup |
-| `--steps` | 1000 | Pas d'entraînement par itération |
+| `--simulations` | 800 | Simulations MCTS par coup |
+| `--steps` | 300 | Pas d'entraînement par itération |
 | `--batch` | 512 | Taille du batch |
 | `--device` | auto | `cuda`, `cpu`, ou `auto` |
 | `--eval-games` | 40 | Parties pour l'évaluation |
 | `--no-eval` | — | Désactive l'évaluation |
+
+**Google Colab :**
+Utiliser `train_colab.ipynb` à la racine du projet pour un entraînement intensif avec :
+- Mixed precision (FP16) pour le training et l'inférence
+- Self-play parallèle (multi-processus)
+- Graphes de suivi (loss, win rate)
+- Upload/download des checkpoints
 
 Checkpoints sauvegardés dans `alphazero/checkpoints/`.
 Le meilleur modèle est dans `best_model.pt` — remplacé si win rate ≥ 55 % sur 40 parties.
@@ -175,13 +185,14 @@ alphazero/
 ├── config.py         # Hyperparamètres centralisés
 ├── alphabeta.py      # Joueur Alpha-Beta (heuristique BFS 0-1)
 ├── random_player.py  # Joueur aléatoire
-├── network.py        # ResNet 6 blocs, 128 filtres — têtes politique + valeur
-├── mcts_az.py        # MCTS UCB-PUCT guidé par réseau
-├── self_play.py      # Génération de parties + buffer circulaire (50 000 pos.)
+├── network.py        # ResNet 10 blocs, 128 filtres — têtes politique + valeur (~3M params)
+├── mcts_az.py        # MCTS UCB-PUCT guidé par réseau (batch 16, virtual loss)
+├── self_play.py      # Génération de parties + buffer circulaire (200 000 pos.)
 ├── trainer.py        # Boucle AlphaZero : self-play → train → eval → checkpoint
 ├── evaluate.py       # Comparaison de modèles, test vs random
 ├── play.py           # Wrapper CLI AlphaZero (protocole BOARD/PLAYER)
-└── tournament.py     # Tournoi Python (appels directs ou subprocess)
+├── tournament.py     # Tournoi Python (appels directs ou subprocess)
+train_colab.ipynb     # Notebook Colab (FP16, self-play parallèle, monitoring)
 ```
 
 ### Moteur (`hex_env.py`)
@@ -210,8 +221,10 @@ Sélection par score UCB-PUCT :
 U(s,a) = Q(s,a) + c_puct × P(s,a) × √ΣN(s) / (1 + N(s,a))
 ```
 
-- `c_puct = 1.0` — bruit Dirichlet à la racine en self-play (α=0.3, ε=0.25)
-- Température τ=1 pour les 15 premiers coups, puis τ→0 (argmax)
+- `c_puct = 1.0` — bruit Dirichlet à la racine en self-play (α=0.03, ε=0.25)
+- Température τ=1 pour les 20 premiers coups, puis τ→0 (argmax)
+- Inférence FP16 automatique sur GPU (torch.amp.autocast)
+- Batch MCTS : 16 feuilles par inférence GPU
 
 ### Boucle d'entraînement (`trainer.py`)
 

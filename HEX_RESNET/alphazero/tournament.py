@@ -59,8 +59,13 @@ class AlphaZeroPlayer:
             net = None
         else:
             net = HexNet().to(device)
-            net.load_state_dict(torch.load(path, map_location=device))
-            net.eval()
+            try:
+                net.load_state_dict(torch.load(path, map_location=device))
+            except RuntimeError:
+                print(f"WARN: checkpoint incompatible ({path}), architecture changée → politique uniforme.", file=sys.stderr)
+                net = None
+            if net is not None:
+                net.eval()
 
         self._agent = MCTSAgent(net, device=device, sims=sims, add_dirichlet=False)
         self._sims = sims
@@ -312,7 +317,7 @@ def _resolve_ai(name: str, time_s: float):
         from random_player import RandomPlayer
         return RandomPlayer(), 'Random'
     if n == 'alphazero':
-        sims = 400 if time_s >= 2.0 else 200 if time_s >= 1.0 else 100
+        sims = 800 if time_s >= 2.0 else 400 if time_s >= 1.0 else 200
         return AlphaZeroPlayer(sims=sims), 'AlphaZero'
     return name, name
 

@@ -1,4 +1,5 @@
 # mcts_az.py — MCTS guidé par réseau de neurones (UCB-PUCT style AlphaZero)
+# Optimisations : expansion paresseuse, inférence batchée, virtual loss
 
 import math
 import numpy as np
@@ -10,6 +11,11 @@ from config import (
     TEMPERATURE_MOVES, NUM_CELLS
 )
 
+# Virtual loss appliquée lors de la sélection batchée
+_VIRTUAL_LOSS = 3
+# Nombre de feuilles à collecter par batch
+_BATCH_SIZE = 16
+
 
 class MCTSNode:
     """Nœud de l'arbre MCTS."""
@@ -17,8 +23,8 @@ class MCTSNode:
     __slots__ = ('env', 'parent', 'move', 'children',
                  'N', 'W', 'Q', 'P', 'is_expanded', 'is_terminal')
 
-    def __init__(self, env: HexEnv, parent: "MCTSNode | None" = None, move: int = -1, prior: float = 0.0):
-        self.env         = env
+    def __init__(self, env: HexEnv | None, parent: "MCTSNode | None" = None, move: int = -1, prior: float = 0.0):
+        self.env         = env         # None si expansion paresseuse (créé à la visite)
         self.parent      = parent
         self.move        = move        # coup qui a mené à ce nœud
         self.children    : dict[int, "MCTSNode"] = {}
@@ -35,6 +41,7 @@ class MCTSNode:
 class MCTSAgent:
     """
     Agent MCTS guidé par un réseau de neurones (AlphaZero UCB-PUCT).
+    Utilise l'inférence batchée avec virtual loss pour maximiser l'utilisation GPU.
 
     Si `net` est None, utilise une politique uniforme (utile pour les tests).
     """
@@ -64,7 +71,6 @@ class MCTSAgent:
         legal_mask = env.legal_mask()
 
         if self.net is None:
-            # Politique uniforme sur les coups légaux
             n_legal = legal_mask.sum()
             policy = legal_mask.astype(np.float32) / max(n_legal, 1)
             return policy, 0.0
@@ -94,64 +100,139 @@ class MCTSAgent:
 
     # ─── Expansion ────────────────────────────────────────────────────────────
 
+    def _expand_with_policy(self, node: MCTSNode, policy: np.ndarray) -> None:
+        """Crée les enfants à partir d'une politique déjà calculée."""
+        node.is_expanded = True
+        for move in range(NUM_CELLS):
+            if policy[move] > 0:
+                node.children[move] = MCTSNode(
+                    env=None, parent=node, move=move, prior=float(policy[move])
+                )
+
     def _expand(self, node: MCTSNode) -> float:
         """
-        Expanse le nœud : appelle le réseau et crée les enfants.
+        Expanse le nœud : appelle le réseau et crée les enfants (paresseusement).
         Retourne la valeur (depuis le point de vue du joueur AU nœud).
         """
         if node.env.is_terminal():
             node.is_terminal = True
-            # Le joueur qui vient de jouer a gagné → valeur +1 pour l'adversaire
-            # (c'est l'adversaire qui est maintenant au trait)
             return -1.0
 
         policy, value = self._evaluate(node.env)
-        node.is_expanded = True
-
-        for move in range(NUM_CELLS):
-            if policy[move] > 0:
-                child_env = node.env.copy()
-                child_env.apply_move(move)
-                node.children[move] = MCTSNode(
-                    env=child_env, parent=node, move=move, prior=float(policy[move])
-                )
-
-        return value  # valeur du joueur courant au nœud
+        self._expand_with_policy(node, policy)
+        return value
 
     # ─── Backpropagation ──────────────────────────────────────────────────────
 
     def _backprop(self, node: MCTSNode, value: float) -> None:
-        """
-        Remonte la valeur dans l'arbre.
-        La valeur alterne de signe à chaque niveau (point de vue du joueur courant).
-        """
+        """Remonte la valeur dans l'arbre (alterne le signe à chaque niveau)."""
         cur = node
         v   = value
         while cur is not None:
             cur.N += 1
             cur.W += v
             cur.Q  = cur.W / cur.N
-            v   = -v           # changement de point de vue
+            v   = -v
             cur = cur.parent
 
-    # ─── Simulation complète ──────────────────────────────────────────────────
+    # ─── Virtual loss ─────────────────────────────────────────────────────────
 
-    def _simulate(self, root: MCTSNode) -> None:
-        """Effectue une simulation MCTS depuis la racine."""
+    def _apply_virtual_loss(self, node: MCTSNode) -> None:
+        """Applique une virtual loss sur le chemin de la racine à la feuille."""
+        cur = node
+        while cur is not None:
+            cur.N += _VIRTUAL_LOSS
+            cur.W -= _VIRTUAL_LOSS
+            cur.Q = cur.W / cur.N if cur.N > 0 else 0.0
+            cur = cur.parent
+
+    def _undo_virtual_loss(self, node: MCTSNode) -> None:
+        """Annule la virtual loss sur le chemin de la racine à la feuille."""
+        cur = node
+        while cur is not None:
+            cur.N -= _VIRTUAL_LOSS
+            cur.W += _VIRTUAL_LOSS
+            cur.Q = cur.W / cur.N if cur.N > 0 else 0.0
+            cur = cur.parent
+
+    # ─── Sélection d'une feuille (descente + materialisation env) ─────────────
+
+    def _select_leaf(self, root: MCTSNode) -> MCTSNode:
+        """Descend de la racine jusqu'à une feuille non-expandée."""
         node = root
-
-        # Descente
         while node.is_expanded and not node.is_terminal:
             move = self._select_child(node)
             if move == -1:
                 break
-            node = node.children[move]
+            child = node.children[move]
+            if child.env is None:
+                child.env = node.env.copy()
+                child.env.apply_move(move)
+            node = child
+        return node
 
-        # Expansion + évaluation
+    # ─── Simulation séquentielle (fallback) ───────────────────────────────────
+
+    def _simulate(self, root: MCTSNode) -> None:
+        """Effectue une simulation MCTS depuis la racine."""
+        node = self._select_leaf(root)
         value = self._expand(node)
-
-        # Backpropagation
         self._backprop(node, value)
+
+    # ─── Simulation batchée ───────────────────────────────────────────────────
+
+    def _simulate_batch(self, root: MCTSNode, batch_size: int) -> None:
+        """
+        Sélectionne plusieurs feuilles avec virtual loss, les évalue en batch,
+        puis expand et backprop.
+        """
+        leaves = []
+        terminal_leaves = []
+
+        for _ in range(batch_size):
+            leaf = self._select_leaf(root)
+
+            if leaf.is_terminal or leaf.is_expanded:
+                # Terminal ou déjà expandé (collision) : traitement immédiat
+                if leaf.is_terminal:
+                    self._backprop(leaf, -1.0)
+                continue
+
+            # Matérialiser l'env si nécessaire (devrait déjà être fait par _select_leaf)
+            if leaf.env is None:
+                continue
+
+            if leaf.env.is_terminal():
+                leaf.is_terminal = True
+                self._backprop(leaf, -1.0)
+                continue
+
+            # Appliquer virtual loss pour diversifier les sélections suivantes
+            self._apply_virtual_loss(leaf)
+            leaves.append(leaf)
+
+        if not leaves:
+            return
+
+        if self.net is None:
+            # Sans réseau : expansion séquentielle uniforme
+            for leaf in leaves:
+                self._undo_virtual_loss(leaf)
+                value = self._expand(leaf)
+                self._backprop(leaf, value)
+            return
+
+        # ── Batch inference GPU ───────────────────────────────────────────────
+        states = np.stack([leaf.env.get_state_tensor() for leaf in leaves])
+        masks = np.stack([leaf.env.legal_mask() for leaf in leaves])
+
+        policies, values = self.net.batch_predict(states, masks, self.device)
+
+        # ── Expand + backprop ─────────────────────────────────────────────────
+        for i, leaf in enumerate(leaves):
+            self._undo_virtual_loss(leaf)
+            self._expand_with_policy(leaf, policies[i])
+            self._backprop(leaf, float(values[i]))
 
     # ─── Politique MCTS ───────────────────────────────────────────────────────
 
@@ -160,6 +241,7 @@ class MCTSAgent:
         env: HexEnv,
         move_count: int = 0,
         return_root: bool = False,
+        reuse_root: MCTSNode | None = None,
     ) -> np.ndarray | tuple[np.ndarray, MCTSNode]:
         """
         Lance `self.sims` simulations depuis l'état `env`.
@@ -167,12 +249,15 @@ class MCTSAgent:
 
         move_count : numéro du coup (pour le paramètre de température τ)
         return_root : si True, retourne aussi le nœud racine
+        reuse_root : sous-arbre à réutiliser (tree reuse)
         """
-        root_env = env.copy()
-        root = MCTSNode(root_env)
-
-        # Premier expand pour obtenir les a priori
-        self._expand(root)
+        if reuse_root is not None and reuse_root.is_expanded:
+            root = reuse_root
+            root.parent = None  # détacher du parent pour le GC
+        else:
+            root_env = env.copy()
+            root = MCTSNode(root_env)
+            self._expand(root)
 
         # Bruit Dirichlet à la racine (self-play uniquement)
         if self.add_dirichlet and root.children:
@@ -182,9 +267,18 @@ class MCTSAgent:
                 child = root.children[m]
                 child.P = (1 - DIRICHLET_EPS) * child.P + DIRICHLET_EPS * n
 
-        # Simulations
-        for _ in range(self.sims - 1):   # -1 car on a déjà évalué la racine
-            self._simulate(root)
+        # Simulations batchées (si réseau disponible)
+        remaining = self.sims - 1  # -1 car on a déjà évalué la racine
+        use_batch = self.net is not None
+        batch_sz = _BATCH_SIZE if use_batch else 1
+
+        while remaining > 0:
+            if use_batch and remaining >= batch_sz:
+                self._simulate_batch(root, batch_sz)
+                remaining -= batch_sz
+            else:
+                self._simulate(root)
+                remaining -= 1
 
         # Construction de la distribution π
         pi = np.zeros(NUM_CELLS, dtype=np.float32)
@@ -193,12 +287,10 @@ class MCTSAgent:
 
         # Température
         if move_count < TEMPERATURE_MOVES:
-            # τ = 1 : proportionnel aux visites
             s = pi.sum()
             if s > 0:
                 pi /= s
         else:
-            # τ → 0 : coup argmax
             best = pi.argmax()
             pi[:] = 0.0
             pi[best] = 1.0
@@ -212,7 +304,6 @@ class MCTSAgent:
     def select_move(self, env: HexEnv, move_count: int = 0) -> int:
         """Retourne le coup choisi (index 0..120) selon la politique MCTS."""
         pi = self.get_policy(env, move_count=move_count)
-        # Échantillonnage si τ=1, argmax si τ→0
         if move_count < TEMPERATURE_MOVES:
             return int(np.random.choice(NUM_CELLS, p=pi))
         else:

@@ -34,7 +34,11 @@ from config import NUM_CELLS
 def load_model(path: str, device: torch.device) -> HexNet:
     """Charge un modèle HexNet depuis un fichier .pt."""
     net = HexNet().to(device)
-    net.load_state_dict(torch.load(path, map_location=device, weights_only=True))
+    try:
+        net.load_state_dict(torch.load(path, map_location=device, weights_only=True))
+    except RuntimeError:
+        print(f"WARN: checkpoint incompatible ({path}), skip.", file=sys.stderr)
+        return None
     net.eval()
     return net
 
