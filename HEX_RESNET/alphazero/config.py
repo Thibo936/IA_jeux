@@ -19,7 +19,7 @@ TEMPERATURE_MOVES   = 20    # coups joués avec τ=1 avant de passer à τ→0
 
 # ─── Self-play ────────────────────────────────────────────────────────────────
 GAMES_PER_ITER      = 100   # parties par itération de self-play
-REPLAY_BUFFER_SIZE  = 200_000  # taille du buffer circulaire (positions)
+REPLAY_BUFFER_SIZE  = 150_000  # taille du buffer circulaire (positions)
 
 # ─── Entraînement ─────────────────────────────────────────────────────────────
 BATCH_SIZE          = 512
@@ -27,7 +27,7 @@ LEARNING_RATE       = 1e-3
 LR_SCHEDULER        = "cosine"
 LR_ETA_MIN          = 1e-5   # LR minimale pour le cosine annealing
 WEIGHT_DECAY        = 1e-4
-TRAIN_STEPS         = 300    # steps par itération (limité pour éviter l'overfitting du buffer)
+TRAIN_STEPS         = 1500   # steps par itération (~4 passes sur le buffer)
 
 # ─── Évaluation ───────────────────────────────────────────────────────────────
 EVAL_GAMES          = 40     # parties d'évaluation (20 par couleur)

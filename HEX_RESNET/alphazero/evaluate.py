@@ -1,5 +1,7 @@
 # evaluate.py — Comparaison de deux modèles HexNet par tournoi interne
 
+import sys
+import time
 import numpy as np
 import torch
 
@@ -51,23 +53,38 @@ def evaluate_models(
 
     wins = 0
     half = num_games // 2
+    width = 25
+    t_start = time.time()
+
+    def _afficher(done: int, phase: str) -> None:
+        elapsed = time.time() - t_start
+        vitesse = done / elapsed if elapsed > 0 else 0
+        eta = (num_games - done) / vitesse if vitesse > 0 else 0
+        wr = wins / done if done > 0 else 0.0
+        filled = int(width * done / num_games)
+        bar = '█' * filled + '░' * (width - filled)
+        sys.stdout.write(
+            f"\r  [{bar}] {done}/{num_games} ({phase}) | "
+            f"wins={wins} wr={wr:.0%} | "
+            f"écoulé:{elapsed:.0f}s ETA:{eta:.0f}s"
+        )
+        sys.stdout.flush()
 
     # Moitié des parties : new_net joue Blue
     for i in range(half):
         winner = _play_game(agent_new, agent_best)
         if winner == 'blue':
             wins += 1
-        if (i + 1) % 5 == 0:
-            print(f"    Éval Blue {i+1}/{half} — new wins={wins}")
+        _afficher(i + 1, "Blue")
 
     # Moitié des parties : new_net joue Red
     for i in range(num_games - half):
         winner = _play_game(agent_best, agent_new)
         if winner == 'red':
             wins += 1
-        if (i + 1) % 5 == 0:
-            print(f"    Éval Red {i+1}/{num_games-half} — new wins={wins}")
+        _afficher(half + i + 1, "Red ")
 
+    sys.stdout.write('\n')
     return wins / num_games
 
 
@@ -122,7 +139,11 @@ if __name__ == "__main__":
         sys.exit(1)
 
     net = HexNet().to(device)
-    net.load_state_dict(torch.load(best_path, map_location=device))
+    try:
+        net.load_state_dict(torch.load(best_path, map_location=device))
+    except RuntimeError:
+        print(f"Checkpoint incompatible ({best_path}), architecture changée.")
+        sys.exit(1)
     print(f"Modèle chargé : {best_path}")
 
     print("\nTest vs joueur aléatoire (20 parties)...")
