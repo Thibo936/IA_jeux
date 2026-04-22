@@ -19,7 +19,7 @@ from config import BOARD_SIZE, NUM_CELLS
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
 
-MAX_DEPTH  = 1 # (4 rapide, 5 10sec, 6 trop long)
+MAX_DEPTH  = 4 # (4 rapide, 5 10sec, 6 trop long)
 SCORE_WIN  =  100_000
 SCORE_LOSE = -100_000
 

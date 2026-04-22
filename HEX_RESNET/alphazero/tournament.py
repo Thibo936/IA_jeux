@@ -9,11 +9,13 @@ Chaque IA peut être :
 Utilisation en ligne de commande (depuis la racine du projet) :
   python alphazero/tournament.py <ai1> <ai2> [nb_parties] [-v] [-t <s>]
 
-  ai : 'alphabeta', 'random', 'alphazero', ou chemin d'un exécutable/commande
+  ai : 'alphabeta', 'random', 'alphazero', 'mc_pure', 'mcts_light',
+      'heuristic', 'mohex', ou chemin d'un exécutable/commande
 
 Exemples :
   python alphazero/tournament.py alphabeta random 20
   python alphazero/tournament.py alphabeta alphazero 10 -v -t 2.0
+    python alphazero/tournament.py mc_pure mcts_light 10 -t 1.0
   python alphazero/tournament.py alphabeta ./TC_MG_mcts_hex 20 -t 1.5
 """
 
@@ -307,6 +309,10 @@ def _resolve_ai(name: str, time_s: float):
     'alphabeta' → AlphaBetaPlayer()
     'random'    → RandomPlayer()
     'alphazero' → AlphaZeroPlayer()
+    'mc_pure' ou 'montecarlo' → PureMonteCarloPlayer()
+    'mcts_light' ou 'mcts' → LightMCTSPlayer()
+    'heuristic' → HeuristicPlayer()
+    'mohex'     → MoHexPlayer()
     autre       → traité comme commande externe (chaîne brute)
     """
     n = name.lower()
@@ -319,6 +325,21 @@ def _resolve_ai(name: str, time_s: float):
     if n == 'alphazero':
         sims = 800 if time_s >= 2.0 else 400 if time_s >= 1.0 else 200
         return AlphaZeroPlayer(sims=sims), 'AlphaZero'
+    if n in ('mc_pure', 'montecarlo', 'monte_carlo'):
+        from monte_carlo_pure import PureMonteCarloPlayer
+        return PureMonteCarloPlayer(), 'MonteCarloPur'
+    if n in ('mcts_light', 'mcts'):
+        from mcts_light import LightMCTSPlayer
+        return LightMCTSPlayer(), 'MCTSLight'
+    if n == 'heuristic':
+        from heuristic_player import HeuristicPlayer
+        return HeuristicPlayer(), 'Heuristic'
+    if n == 'mohex':
+        from mohex import MoHexPlayer
+        return MoHexPlayer(), 'MoHex'
+    if n in ('humain', 'human'):
+        from humain import HumanPlayer
+        return HumanPlayer(), 'Humain'
     return name, name
 
 
@@ -331,9 +352,11 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument('ai1',
-        help="IA 1 : 'alphabeta', 'random', 'alphazero', ou commande externe")
+        help=("IA 1 : 'alphabeta', 'random', 'alphazero', 'mc_pure', "
+              "'mcts_light', 'heuristic', 'mohex', 'humain', ou commande externe"))
     parser.add_argument('ai2',
-        help="IA 2 : 'alphabeta', 'random', 'alphazero', ou commande externe")
+        help=("IA 2 : 'alphabeta', 'random', 'alphazero', 'mc_pure', "
+              "'mcts_light', 'heuristic', 'mohex', ou commande externe"))
     parser.add_argument('games', nargs='?', type=int, default=20,
         help="Nombre de parties (défaut: 20)")
     parser.add_argument('-v', '--verbose', action='store_true',

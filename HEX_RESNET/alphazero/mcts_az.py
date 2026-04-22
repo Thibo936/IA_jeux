@@ -14,7 +14,7 @@ from config import (
 # Virtual loss appliquée lors de la sélection batchée
 _VIRTUAL_LOSS = 3
 # Nombre de feuilles à collecter par batch
-_BATCH_SIZE = 16
+_BATCH_SIZE = 32
 
 
 class MCTSNode:
@@ -181,13 +181,14 @@ class MCTSAgent:
 
     # ─── Simulation batchée ───────────────────────────────────────────────────
 
-    def _simulate_batch(self, root: MCTSNode, batch_size: int) -> None:
+    def _simulate_batch(self, root: MCTSNode, batch_size: int) -> int:
         """
         Sélectionne plusieurs feuilles avec virtual loss, les évalue en batch,
         puis expand et backprop.
+        Retourne le nombre de simulations effectivement réalisées.
         """
         leaves = []
-        terminal_leaves = []
+        handled = 0  # terminaux et collisions traités
 
         for _ in range(batch_size):
             leaf = self._select_leaf(root)
@@ -196,6 +197,7 @@ class MCTSAgent:
                 # Terminal ou déjà expandé (collision) : traitement immédiat
                 if leaf.is_terminal:
                     self._backprop(leaf, -1.0)
+                    handled += 1
                 continue
 
             # Matérialiser l'env si nécessaire (devrait déjà être fait par _select_leaf)
@@ -205,6 +207,7 @@ class MCTSAgent:
             if leaf.env.is_terminal():
                 leaf.is_terminal = True
                 self._backprop(leaf, -1.0)
+                handled += 1
                 continue
 
             # Appliquer virtual loss pour diversifier les sélections suivantes
@@ -212,7 +215,7 @@ class MCTSAgent:
             leaves.append(leaf)
 
         if not leaves:
-            return
+            return max(handled, 1)  # au moins 1 pour éviter boucle infinie
 
         if self.net is None:
             # Sans réseau : expansion séquentielle uniforme
@@ -220,7 +223,7 @@ class MCTSAgent:
                 self._undo_virtual_loss(leaf)
                 value = self._expand(leaf)
                 self._backprop(leaf, value)
-            return
+            return len(leaves) + handled
 
         # ── Batch inference GPU ───────────────────────────────────────────────
         states = np.stack([leaf.env.get_state_tensor() for leaf in leaves])
@@ -233,6 +236,8 @@ class MCTSAgent:
             self._undo_virtual_loss(leaf)
             self._expand_with_policy(leaf, policies[i])
             self._backprop(leaf, float(values[i]))
+
+        return len(leaves) + handled
 
     # ─── Politique MCTS ───────────────────────────────────────────────────────
 
@@ -274,8 +279,8 @@ class MCTSAgent:
 
         while remaining > 0:
             if use_batch and remaining >= batch_sz:
-                self._simulate_batch(root, batch_sz)
-                remaining -= batch_sz
+                done = self._simulate_batch(root, batch_sz)
+                remaining -= done
             else:
                 self._simulate(root)
                 remaining -= 1

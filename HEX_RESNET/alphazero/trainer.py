@@ -149,7 +149,7 @@ def main():
             )
         raise SystemExit(
             "Erreur : aucun GPU CUDA/ROCm n'est disponible. "
-            "Installe une version PyTorch compatible GPU ou lance avec --device cpu."
+            "Installe une version PyTorch compatible GPU, ou lance avec --device auto / --device cpu."
         )
     else:
         device = torch.device(args.device)
@@ -239,6 +239,14 @@ def main():
                     print("  ✗ Ancien modèle conservé.")
                     # Recharger l'ancien meilleur pour continuer l'entraînement
                     load_checkpoint(net, BEST_MODEL_FILE, device)
+                    # Réinitialiser l'optimiseur (les moments Adam sont obsolètes)
+                    remaining_steps = (args.iterations - iteration) * args.steps
+                    optimizer = torch.optim.Adam(
+                        net.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+                    )
+                    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                        optimizer, T_max=max(remaining_steps, 1), eta_min=LR_ETA_MIN
+                    )
 
         # Sauvegarde du buffer
         buffer.save(buffer_path)
