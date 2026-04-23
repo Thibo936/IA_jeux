@@ -11,7 +11,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from threading import local
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar
 from weakref import WeakValueDictionary
 
 from ._error import Timeout
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from ._read_write import ReadWriteLock
+    from ._soft_rw import SoftReadWriteLock
 
     if sys.version_info >= (3, 11):  # pragma: no cover (py311+)
         from typing import Self
@@ -55,10 +56,10 @@ _registry = _ThreadLocalRegistry()
 class AcquireReturnProxy:
     """A context-aware object that will release the lock file when exiting."""
 
-    def __init__(self, lock: BaseFileLock | ReadWriteLock) -> None:
-        self.lock: BaseFileLock | ReadWriteLock = lock
+    def __init__(self, lock: BaseFileLock | ReadWriteLock | SoftReadWriteLock) -> None:
+        self.lock: BaseFileLock | ReadWriteLock | SoftReadWriteLock = lock
 
-    def __enter__(self) -> BaseFileLock | ReadWriteLock:
+    def __enter__(self) -> BaseFileLock | ReadWriteLock | SoftReadWriteLock:
         return self.lock
 
     def __exit__(
@@ -106,11 +107,14 @@ class ThreadLocalFileContext(FileLockContext, local):
     """A thread local version of the ``FileLockContext`` class."""
 
 
+_T = TypeVar("_T", bound="BaseFileLock")
+
+
 class FileLockMeta(ABCMeta):
     _instances: WeakValueDictionary[str, BaseFileLock]
 
     def __call__(  # noqa: PLR0913
-        cls,
+        cls: type[_T],
         lock_file: str | os.PathLike[str],
         timeout: float = -1,
         mode: int = _UNSET_FILE_MODE,
@@ -121,7 +125,7 @@ class FileLockMeta(ABCMeta):
         poll_interval: float = 0.05,
         lifetime: float | None = None,
         **kwargs: Any,  # capture remaining kwargs for subclasses  # noqa: ANN401
-    ) -> BaseFileLock:
+    ) -> _T:
         if is_singleton:
             instance = cls._instances.get(str(lock_file))
             if instance:
@@ -140,7 +144,7 @@ class FileLockMeta(ABCMeta):
                     if passed_param != set_param
                 }
                 if not non_matching_params:
-                    return cast("BaseFileLock", instance)
+                    return instance  # ty: ignore[invalid-return-type]  # https://github.com/astral-sh/ty/issues/3231
 
                 # parameters do not match; raise error
                 msg = "Singleton lock instances cannot be initialized with differing arguments"
@@ -172,7 +176,7 @@ class FileLockMeta(ABCMeta):
         if is_singleton:
             cls._instances[str(lock_file)] = instance
 
-        return cast("BaseFileLock", instance)
+        return instance
 
 
 class BaseFileLock(contextlib.ContextDecorator, metaclass=FileLockMeta):

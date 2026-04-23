@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from torch.fx.experimental.graph_gradual_typechecker import Refine
+from torch.fx.experimental.unification import unify, Var  # type: ignore[attr-defined]
 from torch.fx.tensor_type import TensorType
-from torch.fx.experimental.unification import Var, unify  # type: ignore[attr-defined]
 
 
 def infer_symbolic_types_single_pass(traced):
@@ -13,12 +13,13 @@ def infer_symbolic_types_single_pass(traced):
     mgu = unify_eq(r.constraints)
     substitute_all_types(traced.graph, mgu)
 
+
 def infer_symbolic_types(traced):
     """
     Calls our symbolic inferencer twice.
     This is useful when one pass is not enough
     to infer all the information such as the case
-    for braodcasting.
+    for broadcasting.
     """
     r = Refine(traced)
     r.refine()
@@ -31,6 +32,7 @@ def infer_symbolic_types(traced):
     substitute_all_types(traced.graph, mgu)
 
     r.symbolic_relations()
+
 
 def convert_eq(list_of_eq):
     """
@@ -59,7 +61,7 @@ def substitute_solution_one_type(mapping, t):
     Apply the most general unifier to a type
     """
     if isinstance(t, Var):
-        if t in mapping.keys():
+        if t in mapping:
             return mapping[t]
         else:
             return t
@@ -67,7 +69,7 @@ def substitute_solution_one_type(mapping, t):
     elif isinstance(t, TensorType):
         new_type = []
         for typ in t.__args__:
-            if typ in mapping.keys():
+            if typ in mapping:
                 new_type.append(mapping[typ])
             else:
                 new_type.append(typ)
@@ -100,7 +102,7 @@ def substitute_all_types(graph, mapping):
         flag = False
         for k in mapping:
             old_mapping_val = mapping[k]
-            if mapping[k] in mapping.keys():
+            if mapping[k] in mapping:
                 new_key = mapping[k]
                 mapping[k] = mapping[new_key]
             if old_mapping_val != mapping[k]:
@@ -108,6 +110,7 @@ def substitute_all_types(graph, mapping):
 
     for n in graph.nodes:
         n.type = substitute_solution_one_type(mapping, n.type)
+
 
 def check_for_type_equality(g1, g2):
     """

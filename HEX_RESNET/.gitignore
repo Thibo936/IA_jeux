@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Environnements virtuels
+venv/
+env/
+.venv/
+
+# Checkpoints et modèles entraînés
+alphazero/checkpoints/model_iter_*.pt
+alphazero/checkpoints/replay_buffer.npz
+# Garder best_model.pt (meilleur modèle, utile à versionner)
+# Pour ignorer aussi : alphazero/checkpoints/best_model.pt
+
+# Résultats de tournois / rankings (générés automatiquement)
+alphazero/rank/
+alphazero/model_rank/
+
+# Fichiers swap / temporaires
+*.swp
+*.swo
+*~
+..*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

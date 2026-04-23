@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 
-from typing import List
 
 import torch
 
@@ -12,14 +11,18 @@ import torch
 # Verifies each given dtype is a torch.dtype
 def _validate_dtypes(*dtypes):
     for dtype in dtypes:
-        assert isinstance(dtype, torch.dtype)
+        if not isinstance(dtype, torch.dtype):
+            raise AssertionError(f"Expected dtype to be torch.dtype, got {type(dtype)}")
     return dtypes
 
 
 # class for tuples corresponding to a PyTorch dispatch macro
 class _dispatch_dtypes(tuple):
+    __slots__ = ()
+
     def __add__(self, other):
-        assert isinstance(other, tuple)
+        if not isinstance(other, tuple):
+            raise AssertionError(f"Expected other to be a tuple, got {type(other)}")
         return _dispatch_dtypes(tuple.__add__(self, other))
 
 
@@ -120,6 +123,41 @@ def all_types_and_half():
     return _all_types_and_half
 
 
+_all_mps_types = (
+    _dispatch_dtypes({torch.float, torch.half, torch.bfloat16}) + _integral_types
+)
+
+
+def all_mps_types():
+    return _all_mps_types
+
+
+def all_mps_types_and(*dtypes):
+    return _all_mps_types + _validate_dtypes(*dtypes)
+
+
+_float8_types = _dispatch_dtypes(
+    (
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+    )
+)
+
+
+def float8_types():
+    return _float8_types
+
+
+def float8_types_and(*dtypes):
+    return _float8_types + _validate_dtypes(*dtypes)
+
+
+def all_types_complex_float8_and(*dtypes):
+    return _all_types + _complex_types + _float8_types + _validate_dtypes(*dtypes)
+
+
 def custom_types(*dtypes):
     """Create a list of arbitrary dtypes"""
     return _empty_types + _validate_dtypes(*dtypes)
@@ -136,7 +174,7 @@ def get_all_dtypes(
     include_complex=True,
     include_complex32=False,
     include_qint=False,
-) -> List[torch.dtype]:
+) -> list[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(
         include_half=include_half, include_bfloat16=include_bfloat16
     )
@@ -149,7 +187,7 @@ def get_all_dtypes(
     return dtypes
 
 
-def get_all_math_dtypes(device) -> List[torch.dtype]:
+def get_all_math_dtypes(device) -> list[torch.dtype]:
     return (
         get_all_int_dtypes()
         + get_all_fp_dtypes(
@@ -159,7 +197,7 @@ def get_all_math_dtypes(device) -> List[torch.dtype]:
     )
 
 
-def get_all_complex_dtypes(include_complex32=False) -> List[torch.dtype]:
+def get_all_complex_dtypes(include_complex32=False) -> list[torch.dtype]:
     return (
         [torch.complex32, torch.complex64, torch.complex128]
         if include_complex32
@@ -167,11 +205,11 @@ def get_all_complex_dtypes(include_complex32=False) -> List[torch.dtype]:
     )
 
 
-def get_all_int_dtypes() -> List[torch.dtype]:
+def get_all_int_dtypes() -> list[torch.dtype]:
     return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 
 
-def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dtype]:
+def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> list[torch.dtype]:
     dtypes = [torch.float32, torch.float64]
     if include_half:
         dtypes.append(torch.float16)
@@ -180,7 +218,7 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dt
     return dtypes
 
 
-def get_all_qint_dtypes() -> List[torch.dtype]:
+def get_all_qint_dtypes() -> list[torch.dtype]:
     return [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]
 
 

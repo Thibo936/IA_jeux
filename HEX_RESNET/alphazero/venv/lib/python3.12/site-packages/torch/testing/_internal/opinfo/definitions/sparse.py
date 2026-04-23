@@ -171,7 +171,8 @@ def sample_inputs_sparse_reduction(
                 dtype=inp.dtype,
                 device=inp.device,
             )
-            assert not inp.is_coalesced()
+            if inp.is_coalesced():
+                raise AssertionError("Expected inp to not be coalesced")
             yield SampleInput(
                 inp.requires_grad_(requires_grad),
                 args=sample_input.args,
@@ -204,7 +205,7 @@ def _validate_sample_input_sparse_reduction(op_info, sample, check_validate=Fals
     if op_info.name == "sum":
         sample = _validate_sample_input_sparse_reduction_sum(sample)
 
-    if op_info.name in {"masked.sum"}:
+    if op_info.name == "masked.sum":
         mask = sample.kwargs.get("mask", UNSPECIFIED)
         if (
             mask not in {None, UNSPECIFIED}
@@ -237,7 +238,6 @@ def _validate_sample_input_sparse_reduction(op_info, sample, check_validate=Fals
 
     if op_info.name in {"masked.amax", "masked.amin", "masked.mean", "masked.prod"}:
         t_inp = sample.input
-        batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
         mask = sample.kwargs.get("mask")
         if (
             mask is not None
@@ -321,7 +321,7 @@ def _validate_sample_input_sparse_reduction(op_info, sample, check_validate=Fals
 def _validate_sample_input_sparse_reduction_sum(sample, check_validate=False):
     # NOTE: When fixing a failing sample case, remove the
     #       corresponding if-block
-    t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+    t_inp, t_kwargs = sample.input, sample.kwargs
     dim = t_kwargs.get("dim")
     keepdim = t_kwargs.get("keepdim")
     layout = t_inp.layout
@@ -569,7 +569,7 @@ def sample_inputs_sparse_elementwise_binary_operation(
 def _validate_sample_input_elementwise_binary_sparse_mul(sample):
     # NOTE: When fixing a failing sample case, remove the
     #       corresponding if-block
-    t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+    t_inp, t_args = sample.input, sample.args
     batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
     layout = t_inp.layout
     dtype = t_inp.dtype
@@ -793,12 +793,16 @@ def _sample_inputs_sparse_like_fns(
 
 
 def _validate_sample_input_sparse_like_fns(op_info, sample, check_validate=False):
-    if sample.input.layout in {
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    } and op_info.name not in {"zeros_like"}:
+    if (
+        sample.input.layout
+        in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }
+        and op_info.name != "zeros_like"
+    ):
         if sample.kwargs.get("layout", sample.input.layout) != sample.input.layout:
             return ErrorInput(
                 sample,

@@ -1,0 +1,100 @@
+Self-play parallèle — Notes d'implémentation
+==============================================
+
+## Problème initial
+
+Les 100 parties de self-play tournaient une par une (séquentiellement).
+Chaque appel GPU ne traitait que 16 positions (issues d'un seul arbre MCTS).
+Résultat : GPU à 61%, 19W/140W, 0.06 parties/s, 1699s pour 100 parties.
+Le self-play représentait 88% du temps d'une itération.
+
+## Solution : batching cross-games
+
+8 parties tournent en même temps. À chaque "round" :
+
+1. On prend chaque partie active et on sélectionne 8 feuilles de son arbre MCTS
+2. On regroupe toutes les feuilles → un seul appel GPU avec ~64 positions
+   (8 parties × 8 feuilles)
+3. On dispatche les résultats à chaque partie
+
+  Round N:
+    Partie 1 → 8 feuilles ─┐
+    Partie 2 → 8 feuilles ─┤
+    Partie 3 → 8 feuilles ─┼──→ batch_predict(~64 positions) ──→ dispatch
+    ...                     │
+    Partie 8 → 8 feuilles ─┘
+
+Quand une partie finit ses 800 sims pour un coup, elle joue le coup et
+prépare le suivant. Quand une partie se termine, son slot est recyclé
+avec une nouvelle partie.
+
+## Classes ajoutées dans self_play.py
+
+### GameSlot
+Encapsule une partie en cours :
+- env : HexEnv (état du plateau)
+- root : MCTSNode (racine MCTS pour le coup courant)
+- history : liste de (state_tensor, pi, blue_to_play)
+- sims_remaining : simulations restantes pour le coup courant
+- reuse_node : sous-arbre pour tree reuse
+
+Méthodes :
+- _init_root(agent) : crée la racine, expansion initiale, bruit Dirichlet
+- needs_sims() : True si des simulations restent à faire
+- collect_leaves(agent, max_leaves) : sélectionne des feuilles avec virtual
+  loss, gère terminaux/collisions immédiatement, retourne les feuilles
+  nécessitant une inférence GPU
+- dispatch_results(agent, leaves, policies, values) : undo virtual loss,
+  expand et backprop les feuilles évaluées
+- advance_move(agent) : calcule pi (distribution de visites), applique la
+  température, enregistre l'état, sélectionne et joue le coup, tree reuse.
+  Retourne True si la partie est terminée.
+- finalize(buffer, augment) : écrit toutes les positions dans le buffer
+  avec les z-values (+1/-1 selon le vainqueur). Applique l'augmentation
+  diagonale si demandé.
+
+### run_self_play (réécrit)
+Boucle principale qui orchestre N slots (N=8 par défaut) :
+
+  while parties_complétées < num_games:
+      1. Collecter les feuilles de tous les slots actifs
+      2. Un seul batch_predict GPU pour toutes les feuilles
+      3. Dispatcher les résultats à chaque slot
+      4. Avancer les slots qui ont fini leurs simulations
+         - Si partie terminée → finaliser + recycler le slot
+         - Sinon → préparer le prochain coup
+
+## Quick wins appliqués en parallèle
+
+1. _BATCH_SIZE 16→32 dans mcts_az.py
+   Le RX 6600 XT était sous-alimenté avec 16 inférences par batch.
+
+2. Fix compteur de collisions dans mcts_az.py
+   _simulate_batch décrémentait remaining de batch_sz même quand des
+   collisions réduisaient le nombre de feuilles évaluées.
+   Maintenant _simulate_batch retourne le nombre de sims utiles.
+
+3. Reset optimizer sur revert dans trainer.py
+   Quand le modèle échouait l'évaluation et était revert à best_model.pt,
+   l'optimizer Adam gardait ses moments (exp_avg, exp_avg_sq) calculés sur
+   le modèle rejeté. Les premiers steps d'entraînement suivants appliquaient
+   un momentum incohérent → l'entraînement divergeait.
+   C'est pour ça que le win rate restait à 0% pendant 29 itérations.
+   Maintenant on recrée l'optimizer et le scheduler après un revert.
+
+## Configuration (config.py)
+
+N_PARALLEL_GAMES = 8    # parties simultanées en self-play
+LEAVES_PER_GAME  = 8    # feuilles collectées par partie par round GPU
+
+## Notes
+
+- L'augmentation diagonale est correcte : la valeur est conservée car la
+  symétrie du Hex (transpose + swap couleurs) est un isomorphisme complet.
+  Si Blue gagnait, après mirror Red gagne, et le joueur courant change
+  aussi → la valeur du point de vue du joueur courant reste la même.
+
+- Blue gagne 100% du self-play : c'est normal au Hex (avantage du premier
+  joueur prouvé par argument de strategy-stealing).
+
+- play_one_game() est conservé pour usage standalone/debug.

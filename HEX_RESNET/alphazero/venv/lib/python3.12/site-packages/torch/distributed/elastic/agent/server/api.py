@@ -15,10 +15,11 @@ import time
 import traceback
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -27,6 +28,7 @@ from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import ProcessFailure, SignalException
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -46,7 +48,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class WorkerSpec:
-    """Blueprint information about a particular type of worker.
+    """
+    Blueprint information about a particular type of worker.
 
     For a given role, there must only exist a single worker spec.
     Worker spec is expected to be homogeneous across all nodes (machine),
@@ -71,21 +74,35 @@ class WorkerSpec:
         tee: tees the specified std stream(s) to console + file,
              selectively tee for a particular local rank by passing a map,
              takes precedence over ``redirects`` settings.
-
+        event_log_handler: name of the event logging handler as registered in
+          `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
+                                 that match _any_ of the filter strings.
+        duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
+                                 that match _any_ of the filter strings.
+        virtual_local_rank: Enable virtual local rank mode for workers (defaults to False).
+                            When enabled, LOCAL_RANK is set to 0 for all workers and
+                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
+                            assigned GPU at device index 0.
     """
 
     role: str
     local_world_size: int
     rdzv_handler: rdzv.RendezvousHandler
-    fn: Optional[Callable] = None
+    fn: Callable | None = None
     # TODO @kiuk - make entrypoint a required field
-    entrypoint: Union[Callable, str, None] = None
-    args: Tuple = ()
+    entrypoint: Callable | str | None = None
+    args: tuple = ()
     max_restarts: int = 3
     monitor_interval: float = 0.1
-    master_port: Optional[int] = None
-    master_addr: Optional[str] = None
-    local_addr: Optional[str] = None
+    master_port: int | None = None
+    master_addr: str | None = None
+    local_addr: str | None = None
+    event_log_handler: str = "null"
+    numa_options: NumaOptions | None = None
+    duplicate_stdout_filters: list[str] | None = None
+    duplicate_stderr_filters: list[str] | None = None
+    virtual_local_rank: bool = False
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -95,6 +112,7 @@ class WorkerSpec:
             warnings.warn(
                 "WorkerSpec.fn will be deprecated,"
                 " please use WorkerSpec.entrypoint instead",
+                stacklevel=2,
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
@@ -320,7 +338,7 @@ class _RoleInstanceInfo:
             return -1
 
     @staticmethod
-    def find_role_boundaries(roles_infos: List, role: str) -> Tuple[int, int]:
+    def find_role_boundaries(roles_infos: list, role: str) -> tuple[int, int]:
         start_idx, end_idx = -1, -1
         for idx, role_info in enumerate(roles_infos):
             if role_info.role == role:
@@ -357,8 +375,8 @@ class RunResult:
     """
 
     state: WorkerState
-    return_values: Dict[int, Any] = field(default_factory=dict)
-    failures: Dict[int, ProcessFailure] = field(default_factory=dict)
+    return_values: dict[int, Any] = field(default_factory=dict)
+    failures: dict[int, ProcessFailure] = field(default_factory=dict)
 
     def is_failed(self) -> bool:
         return self.state == WorkerState.FAILED
@@ -424,7 +442,7 @@ class ElasticAgent(abc.ABC):
 
         Note that the worker group is a mutable object and hence in a
         multi-threaded/process environment it may change state.
-        Implementors are encouraged (but not required) to return
+        Implementers are encouraged (but not required) to return
         a defensive read-only copy.
         """
         raise NotImplementedError
@@ -448,7 +466,7 @@ class SimpleElasticAgent(ElasticAgent):
         return self._worker_group
 
     @abc.abstractmethod
-    def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
+    def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         r"""Start ``worker_group.spec.local_world_size`` number of workers.
 
         This is according to worker spec for the worker group .
@@ -457,12 +475,10 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _stop_workers(
-        self, worker_group: WorkerGroup, is_restart: bool = False
-    ) -> None:
+    def _stop_workers(self, worker_group: WorkerGroup) -> None:
         r"""Stop all workers in the given worker group.
 
-        Implementors must deal with workers in all states defined by
+        Implementers must deal with workers in all states defined by
         ``WorkerState``. That is, it must gracefully handle stopping
         non-existent workers, unhealthy (stuck) workers, etc.
         """
@@ -477,9 +493,7 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(
-        self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False
-    ) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
@@ -502,8 +516,8 @@ class SimpleElasticAgent(ElasticAgent):
         group_rank = rdzv_info.rank
         group_world_size = rdzv_info.world_size
 
-        # master_addr/master_port could be explicitly overriden
-        # TODO: BC - specific to static rdzv and can be simplifed further
+        # master_addr/master_port could be explicitly overridden
+        # TODO: BC - specific to static rdzv and can be simplified further
         master_addr = spec.master_addr or rdzv_info.bootstrap_store_info.master_addr
         master_port = spec.master_port or rdzv_info.bootstrap_store_info.master_port
 
@@ -533,7 +547,8 @@ class SimpleElasticAgent(ElasticAgent):
             "  role_ranks=%(role_ranks)s\n"
             "  global_ranks=%(global_ranks)s\n"
             "  role_world_sizes=%(role_world_sizes)s\n"
-            "  global_world_sizes=%(global_world_sizes)s\n",
+            "  global_world_sizes=%(global_world_sizes)s\n"
+            "  event_log_handler=%(event_log_handler)s\n",
             {
                 "role": spec.role,
                 "restart_count": restart_count,
@@ -546,6 +561,7 @@ class SimpleElasticAgent(ElasticAgent):
                 "global_ranks": [worker.global_rank for worker in workers],
                 "role_world_sizes": [worker.role_world_size for worker in workers],
                 "global_world_sizes": [worker.world_size for worker in workers],
+                "event_log_handler": spec.event_log_handler,
             },
         )
 
@@ -554,10 +570,19 @@ class SimpleElasticAgent(ElasticAgent):
     @prof
     def _assign_worker_ranks(
         self, store, group_rank: int, group_world_size: int, spec: WorkerSpec
-    ) -> List[Worker]:
+    ) -> list[Worker]:
         """Determine proper ranks for worker processes.
 
-        The rank assignment is done according to the following algorithm:
+        Fast Path: when all workers have the same role and world size. We calculate
+        the global rank to be group_rank * group_world_size + local_rank. And the
+        `role_world_size` is the same as `global_world_size`. No TCP store is used in
+        this case. This is only enabled when users set the environment variable
+        `TORCH_ELASTIC_WORKER_IDENTICAL` to 1.
+
+        Time complexity: each worker O(1), overall O(1)
+
+        Slow Path: when workers have different roles and world sizes. We use the
+        the following algorithm:
 
         1. Each agent writes its configuration(group_rank, group_world_size
            , num_workers) to the common store.
@@ -577,60 +602,66 @@ class SimpleElasticAgent(ElasticAgent):
         Time complexity: each worker O(1), rank0 O(n), overall O(n)
         """
 
-        ROLE_INFO_PREFIX = "torchelastic/role_info/"
-        ASSIGNED_RANKS_PREFIX = "torchelastic/assigned_ranks/"
+        if os.environ.get("TORCH_ELASTIC_WORKER_IDENTICAL", "0") == "1":
+            global_world_size = group_world_size * spec.local_world_size
+            base_global_rank = group_rank * spec.local_world_size
+            base_role_rank = base_global_rank
+            role_world_size = global_world_size
+        else:
+            ROLE_INFO_PREFIX = "torchelastic/role_info/"
+            ASSIGNED_RANKS_PREFIX = "torchelastic/assigned_ranks/"
 
-        agent_role_info = _RoleInstanceInfo(
-            spec.role, group_rank, spec.local_world_size
-        )
-        store.set(f"{ROLE_INFO_PREFIX}{group_rank}", agent_role_info.serialize())
-
-        # tcp store is collocated with rank 0 so we can use it to do extra compute to reduce overall # of operations.
-        if group_rank == 0:
-            role_infos_bytes = store.multi_get(
-                [f"torchelastic/role_info/{i}" for i in range(group_world_size)]
+            agent_role_info = _RoleInstanceInfo(
+                spec.role, group_rank, spec.local_world_size
             )
-            role_infos = [
-                _RoleInstanceInfo.deserialize(info_bytes)
-                for info_bytes in role_infos_bytes
-            ]
+            store.set(f"{ROLE_INFO_PREFIX}{group_rank}", agent_role_info.serialize())
 
-            role_sizes = defaultdict(lambda: 0)
-            global_size = 0
-            for role_info in role_infos:
-                role_sizes[role_info.role] += role_info.local_world_size
-                global_size += role_info.local_world_size
-
-            base_global_rank = 0
-            role_ranks = defaultdict(lambda: 0)
-
-            keys = []
-            values = []
-            for i, role_info in enumerate(role_infos):
-                keys.append(f"{ASSIGNED_RANKS_PREFIX}{i}")
-                values.append(
-                    json.dumps(
-                        [
-                            base_global_rank,
-                            global_size,
-                            role_ranks[role_info.role],
-                            role_sizes[role_info.role],
-                        ]
-                    )
+            # tcp store is collocated with rank 0 so we can use it to do extra compute to reduce overall # of operations.
+            if group_rank == 0:
+                role_infos_bytes = store.multi_get(
+                    [f"torchelastic/role_info/{i}" for i in range(group_world_size)]
                 )
+                role_infos = [
+                    _RoleInstanceInfo.deserialize(info_bytes)
+                    for info_bytes in role_infos_bytes
+                ]
 
-                base_global_rank += role_info.local_world_size
-                role_ranks[role_info.role] += role_info.local_world_size
+                role_sizes = defaultdict(lambda: 0)
+                global_size = 0
+                for role_info in role_infos:
+                    role_sizes[role_info.role] += role_info.local_world_size
+                    global_size += role_info.local_world_size
 
-            store.multi_set(keys, values)
+                base_global_rank = 0
+                role_ranks = defaultdict(lambda: 0)
 
-        # get will block until the data is available in the store.
-        (
-            base_global_rank,
-            global_world_size,
-            base_role_rank,
-            role_world_size,
-        ) = json.loads(store.get(f"{ASSIGNED_RANKS_PREFIX}{group_rank}"))
+                keys = []
+                values = []
+                for i, role_info in enumerate(role_infos):
+                    keys.append(f"{ASSIGNED_RANKS_PREFIX}{i}")
+                    values.append(
+                        json.dumps(
+                            [
+                                base_global_rank,
+                                global_size,
+                                role_ranks[role_info.role],
+                                role_sizes[role_info.role],
+                            ]
+                        )
+                    )
+
+                    base_global_rank += role_info.local_world_size
+                    role_ranks[role_info.role] += role_info.local_world_size
+
+                store.multi_set(keys, values)
+
+            # get will block until the data is available in the store.
+            (
+                base_global_rank,
+                global_world_size,
+                base_role_rank,
+                role_world_size,
+            ) = json.loads(store.get(f"{ASSIGNED_RANKS_PREFIX}{group_rank}"))
 
         workers = []
         for local_rank in range(spec.local_world_size):
@@ -672,6 +703,10 @@ class SimpleElasticAgent(ElasticAgent):
         for local_rank, w_id in worker_ids.items():
             worker = worker_group.workers[local_rank]
             worker.id = w_id
+            record(
+                self._construct_event("START", EventSource.WORKER, worker),
+                worker_group.spec.event_log_handler,
+            )
 
         worker_group.state = WorkerState.HEALTHY
 
@@ -682,7 +717,7 @@ class SimpleElasticAgent(ElasticAgent):
         """Restart (stops, rendezvous, starts) all local workers in the group."""
         role = worker_group.spec.role
         logger.info("[%s] Stopping worker group", role)
-        self._stop_workers(worker_group, is_restart=True)
+        self._stop_workers(worker_group)
         worker_group.state = WorkerState.STOPPED
         self._initialize_workers(worker_group)
 
@@ -699,7 +734,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)
+            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)
@@ -729,7 +764,19 @@ class SimpleElasticAgent(ElasticAgent):
             failure = result.failures.get(worker.global_rank)
             state: str = self._get_worker_state(worker, result)
             raw_error = json.dumps(failure.error_file_data) if failure else None
-            record(self._construct_event(state, EventSource.WORKER, worker, raw_error))
+            exit_code = failure.exitcode if failure else None
+            worker_pid = failure.pid if failure else None
+            record(
+                self._construct_event(
+                    state=state,
+                    source=EventSource.WORKER,
+                    worker=worker,
+                    raw_error=raw_error,
+                    exit_code=exit_code,
+                    worker_pid=worker_pid,
+                ),
+                self._worker_group.spec.event_log_handler,
+            )
 
     def _get_worker_state(self, worker: Worker, result: RunResult) -> str:
         failure = result.failures.get(worker.global_rank)
@@ -752,16 +799,19 @@ class SimpleElasticAgent(ElasticAgent):
             record(
                 self._construct_event(
                     state=state, source=EventSource.AGENT, duration_ms=duration_ms
-                )
+                ),
+                self._worker_group.spec.event_log_handler,
             )
 
     def _construct_event(
         self,
         state: str,
         source: EventSource,
-        worker: Optional[Worker] = None,
-        raw_error: Optional[str] = None,
-        duration_ms: Optional[float] = None,
+        worker: Worker | None = None,
+        raw_error: str | None = None,
+        duration_ms: float | None = None,
+        exit_code: int | None = None,
+        worker_pid: int | None = None,
     ) -> Event:
         wg = self._worker_group
         spec = wg.spec
@@ -773,6 +823,8 @@ class SimpleElasticAgent(ElasticAgent):
             md["local_rank"] = (worker.local_rank,)
             md["role_rank"] = (worker.role_rank,)
             md["role_world_size"] = (worker.role_world_size,)
+            md["exit_code"] = (exit_code,)
+            md["worker_pid"] = (worker_pid,)
             global_rank = worker.global_rank
             worker_id = str(worker.id)
         else:
@@ -794,6 +846,7 @@ class SimpleElasticAgent(ElasticAgent):
             "agent_restarts": spec.max_restarts - self._remaining_restarts,
             "duration_ms": duration_ms,
         }
+
         return Event(
             f"torchelastic.worker.status.{state}", source=source, metadata=metadata
         )

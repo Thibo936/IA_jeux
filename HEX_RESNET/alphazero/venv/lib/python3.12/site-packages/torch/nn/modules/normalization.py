@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import List, Optional, Tuple, Union
+from typing import Union
 
 import torch
 from torch import Size, Tensor
@@ -60,9 +60,15 @@ class LocalResponseNorm(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.local_response_norm(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self):
+        """
+        Return the extra representation of the module.
+        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
@@ -82,13 +88,19 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
-_shape_t = Union[int, List[int], Size]
+_shape_t = Union[int, list[int], Size]
 
 
 class LayerNorm(Module):
@@ -106,8 +118,8 @@ class LayerNorm(Module):
     the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    The variance is calculated via the biased estimator, equivalent to
+    `torch.var(input, correction=0)`.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -170,7 +182,7 @@ class LayerNorm(Module):
     """
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
-    normalized_shape: Tuple[int, ...]
+    normalized_shape: tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
@@ -237,11 +249,11 @@ class GroupNorm(Module):
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
     :attr:`num_groups`. The mean and standard-deviation are calculated
-    separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
+    separately over each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    The variance is calculated via the biased estimator, equivalent to
+    `torch.var(input, correction=0)`.
 
     This layer uses statistics computed from input data in both training and
     evaluation modes.
@@ -289,7 +301,9 @@ class GroupNorm(Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         if num_channels % num_groups != 0:
-            raise ValueError("num_channels must be divisible by num_groups")
+            raise ValueError(
+                f"num_channels ({num_channels}) must be divisible by num_groups ({num_groups})"
+            )
 
         self.num_groups = num_groups
         self.num_channels = num_channels
@@ -313,7 +327,7 @@ class GroupNorm(Module):
         return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self) -> str:
-        return "{num_groups}, {num_channels}, eps={eps}, " "affine={affine}".format(
+        return "{num_groups}, {num_channels}, eps={eps}, affine={affine}".format(
             **self.__dict__
         )
 
@@ -325,11 +339,12 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y = \frac{x}{\sqrt{\mathrm{RMS}[x] + \epsilon}} * \gamma
+        y_i = \frac{x_i}{\mathrm{RMS}(x)} * \gamma_i, \quad
+        \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
 
-    The root mean squared norm is taken over the last ``D`` dimensions, where ``D``
+    The RMS is taken over the last ``D`` dimensions, where ``D``
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
-    is ``(3, 5)`` (a 2-dimensional shape), the rms norm is computed over
+    is ``(3, 5)`` (a 2-dimensional shape), the RMS is computed over
     the last 2 dimensions of the input.
 
     Args:
@@ -342,10 +357,12 @@ class RMSNorm(Module):
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
-        eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
+        eps: a value added to the denominator for numerical stability. If not specified,
+            uses the machine epsilon of the computation (opmath) type: fp16/bf16 and
+            fp32 inputs use ``torch.finfo(torch.float32).eps``, while fp64 inputs use
+            ``torch.finfo(torch.float64).eps``.
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
+            has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`
@@ -358,15 +375,16 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
+
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
-    normalized_shape: Tuple[int, ...]
-    eps: Optional[float]
+    normalized_shape: tuple[int, ...]
+    eps: float | None
     elementwise_affine: bool
 
     def __init__(
         self,
         normalized_shape: _shape_t,
-        eps: Optional[float] = None,
+        eps: float | None = None,
         elementwise_affine: bool = True,
         device=None,
         dtype=None,
@@ -396,13 +414,13 @@ class RMSNorm(Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Runs forward pass.
+        Runs the forward pass.
         """
         return F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
 
     def extra_repr(self) -> str:
         """
-        Extra information about the module.
+        Return the extra representation of the module.
         """
         return (
             "{normalized_shape}, eps={eps}, "

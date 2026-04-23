@@ -6,6 +6,7 @@ from torch.autograd.function import Function
 
 class SyncBatchNorm(Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(
         self,
         input,
@@ -210,6 +211,7 @@ class SyncBatchNorm(Function):
 
 class CrossMapLRN2d(Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, input, size, alpha=1e-4, beta=0.75, k=1):
         ctx.size = size
         ctx.alpha = alpha
@@ -224,11 +226,7 @@ class CrossMapLRN2d(Function):
 
         ctx.scale = ctx.scale or input.new()
         output = input.new()
-
-        batch_size = input.size(0)
         channels = input.size(1)
-        input_height = input.size(2)
-        input_width = input.size(3)
 
         output.resize_as_(input)
         ctx.scale.resize_as_(input)
@@ -269,6 +267,7 @@ class CrossMapLRN2d(Function):
         return output
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         input, output = ctx.saved_tensors
         grad_input = grad_output.new()
@@ -310,6 +309,7 @@ class CrossMapLRN2d(Function):
 
 class BackwardHookFunction(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, *args):
         ctx.mark_non_differentiable(*[arg for arg in args if not arg.requires_grad])
         return args

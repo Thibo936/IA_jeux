@@ -1,8 +1,13 @@
 # TC_MG_hex — IA pour le jeu de Hex 11×11
 
-Projet L3 (Paris 8). Trois IA jouent au Hex 11×11 en **full Python** :
+https://www.hexwiki.net/index.php/KataHex
+
+Projet L3 (Paris 8). Six IA jouent au Hex 11×11 en **full Python** :
 - **Alpha-Beta** — recherche alpha-bêta avec heuristique BFS 0-1
 - **MCTS guidé** — Monte-Carlo Tree Search avec réseau de neurones (AlphaZero)
+- **Monte Carlo pur** — rollouts aléatoires sans arbre
+- **MCTS léger** — UCT sans réseau
+- **Heuristique** — coup glouton via plus court chemin virtuel
 - **Aléatoire** — joueur de référence
 
 ---
@@ -45,6 +50,12 @@ python trainer.py --iterations 1 --games 10 --simulations 100
 
 # Tournoi Alpha-Beta vs AlphaZero entraîné
 python tournament.py alphabeta alphazero 10 -t 2.0
+
+# Tournoi Monte Carlo pur vs MCTS léger
+python tournament.py mc_pure mcts_light 10 -t 1.0
+
+# Tournoi Heuristique vs Alpha-Beta
+python tournament.py heuristic alphabeta 10 -t 1.0
 ```
 
 ---
@@ -71,6 +82,9 @@ python <ia>.py BOARD PLAYER [time_s]
 python alphabeta.py "........................................................................................................................................................................................................." O
 python random_player.py "........................................................................................................................................................................................................." @
 python play.py "........................................................................................................................................................................................................." O 1.5
+python monte_carlo_pure.py "........................................................................................................................................................................................................." O 1.0
+python mcts_light.py "........................................................................................................................................................................................................." @ 1.0
+python heuristic_player.py "........................................................................................................................................................................................................." O
 ```
 
 ---
@@ -109,6 +123,8 @@ python trainer.py --iterations 100 --games 100 --simulations 800 --steps 500 --d
 # Sans évaluation (plus rapide)
 python trainer.py --iterations 20 --games 50 --simulations 200 --no-eval
 ```
+
+Avec un GPU AMD + ROCm, utiliser aussi `--device cuda` (backend `torch.cuda` côté PyTorch).
 
 | Option | Défaut | Description |
 |---|---|---|
@@ -163,13 +179,15 @@ python tournament.py <ia1> <ia2> [nb_parties] [-v] [-t <s>]
 | `-v` | Affichage du plateau après chaque coup |
 | `-t <s>` | Temps par coup en secondes (défaut : 1.5) |
 
-Mots-clés reconnus : `alphabeta`, `random`, `alphazero`.
+Mots-clés reconnus : `alphabeta`, `random`, `alphazero`, `mc_pure`, `mcts_light`, `heuristic`.
 Tout autre argument est une commande externe appelée via subprocess.
 
 ```bash
 # Exemples
 python tournament.py alphabeta random 20
 python tournament.py alphabeta alphazero 10 -v -t 2.0
+python tournament.py mc_pure mcts_light 10 -t 1.0
+python tournament.py heuristic alphabeta 10 -t 1.0
 python tournament.py alphabeta ./TC_MG_mcts_hex 20   # IA externe
 ```
 
@@ -185,6 +203,9 @@ alphazero/
 ├── config.py         # Hyperparamètres centralisés
 ├── alphabeta.py      # Joueur Alpha-Beta (heuristique BFS 0-1)
 ├── random_player.py  # Joueur aléatoire
+├── monte_carlo_pure.py # Joueur Monte Carlo pur (rollouts aléatoires)
+├── mcts_light.py     # Joueur MCTS léger UCT (sans réseau)
+├── heuristic_player.py # Joueur heuristique glouton (BFS 0-1)
 ├── network.py        # ResNet 10 blocs, 128 filtres — têtes politique + valeur (~3M params)
 ├── mcts_az.py        # MCTS UCB-PUCT guidé par réseau (batch 16, virtual loss)
 ├── self_play.py      # Génération de parties + buffer circulaire (200 000 pos.)

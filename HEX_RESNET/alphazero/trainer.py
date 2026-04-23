@@ -219,6 +219,7 @@ def main():
         save_checkpoint(net, iter_path)
 
         # 3. Évaluation (nouveau vs meilleur)
+        eval_passed = True  # par défaut : --no-eval ou premier modèle
         if not args.no_eval:
             print(f"\n[3/3] Évaluation ({args.eval_games} parties)...")
             t_phase = time.time()
@@ -237,19 +238,16 @@ def main():
                     save_checkpoint(net, BEST_MODEL_FILE)
                 else:
                     print("  ✗ Ancien modèle conservé.")
-                    # Recharger l'ancien meilleur pour continuer l'entraînement
+                    eval_passed = False
+                    # Recharger l'ancien meilleur pour continuer l'entraînement.
+                    # On conserve optimizer et scheduler globaux : le LR poursuit sa
+                    # décroissance cosine sans discontinuité.
                     load_checkpoint(net, BEST_MODEL_FILE, device)
-                    # Réinitialiser l'optimiseur (les moments Adam sont obsolètes)
-                    remaining_steps = (args.iterations - iteration) * args.steps
-                    optimizer = torch.optim.Adam(
-                        net.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
-                    )
-                    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                        optimizer, T_max=max(remaining_steps, 1), eta_min=LR_ETA_MIN
-                    )
 
-        # Sauvegarde du buffer
-        buffer.save(buffer_path)
+        # Sauvegarde du buffer seulement si l'éval a été acceptée : évite de
+        # persister des positions générées par un modèle écarté (pollution du buffer).
+        if eval_passed:
+            buffer.save(buffer_path)
 
         t1 = time.time()
         t_iter = t1 - t0

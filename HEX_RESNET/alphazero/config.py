@@ -13,7 +13,7 @@ INPUT_CHANNELS  = 3     # (Blue, Red, joueur_courant)
 MCTS_SIMULATIONS    = 800   # simulations par coup (entraînement)
 MCTS_SIMULATIONS_EVAL = 400 # simulations par coup (évaluation)
 C_PUCT              = 1.0   # constante d'exploration UCB-PUCT
-DIRICHLET_ALPHA     = 0.03  # bruit Dirichlet à la racine (~10/n_actions)
+DIRICHLET_ALPHA     = 0.08  # bruit Dirichlet à la racine (~10/n_actions)
 DIRICHLET_EPS       = 0.25  # poids du bruit Dirichlet
 TEMPERATURE_MOVES   = 20    # coups joués avec τ=1 avant de passer à τ→0
 
@@ -32,8 +32,8 @@ WEIGHT_DECAY        = 1e-4
 TRAIN_STEPS         = 1500   # steps par itération (~4 passes sur le buffer)
 
 # ─── Évaluation ───────────────────────────────────────────────────────────────
-EVAL_GAMES          = 80     # parties d'évaluation (40 par couleur)
-WIN_RATE_THRESHOLD  = 0.58   # seuil pour accepter le nouveau modèle
+EVAL_GAMES          = 120    # parties d'évaluation (60 par couleur)
+WIN_RATE_THRESHOLD  = 0.55   # seuil pour accepter le nouveau modèle
 
 # ─── Checkpoints ──────────────────────────────────────────────────────────────
 CHECKPOINT_DIR = "checkpoints"

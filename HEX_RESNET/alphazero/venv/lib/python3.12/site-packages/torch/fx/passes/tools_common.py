@@ -1,21 +1,31 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple, Union, Dict, Any, Set, Mapping, Optional
 import collections
-from dataclasses import dataclass
+import heapq
 import operator
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx
-from torch.fx.node import _get_qualified_name
 from torch.fx._compatibility import compatibility
+from torch.fx.node import _get_qualified_name
 
-__all__ = ['get_acc_ops_name', 'get_node_target', 'is_node_output_tensor', 'FxNetAccFusionsFinder', 'legalize_graph']
 
-Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
+__all__ = [
+    "get_acc_ops_name",
+    "get_node_target",
+    "is_node_output_tensor",
+    "FxNetAccFusionsFinder",
+    "legalize_graph",
+    "stable_topological_sort",
+]
+
+Tensors = Union[tuple[torch.Tensor], list[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
-NodeList = List[torch.fx.Node]
-NodeSet = Set[torch.fx.Node]
-Names = List[str]
+NodeList = list[torch.fx.Node]
+NodeSet = set[torch.fx.Node]
+Names = list[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 
@@ -26,12 +36,16 @@ def get_acc_ops_name(k):
     elif k.__module__ and "acc_ops" in k.__module__:
         return f"acc_ops.{k.__name__}"
     else:
-        module = k.__module__.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
+        module = k.__module__.replace(
+            "torch._ops", "torch.ops"
+        )  # WAR for bug in how torch.ops assigns module
         return f"{module if module else ''}.{k.__name__}"
 
 
 @compatibility(is_backward_compatible=False)
-def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node) -> str:
+def get_node_target(
+    submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node
+) -> str:
     """
     Given a `node` returns its target typename.
 
@@ -46,12 +60,16 @@ def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.No
     "torch". e.g. _VariableFunctionsClass.relu would become torch.relu.
     """
 
-    assert node.op in CALLABLE_NODE_OPS, (
-        "Expect op types of " + ", ".join(CALLABLE_NODE_OPS) + f", but found {node.op}"
-    )
+    if node.op not in CALLABLE_NODE_OPS:
+        raise AssertionError(
+            "Expect op types of "
+            + ", ".join(CALLABLE_NODE_OPS)
+            + f", but found {node.op}"
+        )
 
     if node.op == "call_module":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"Expected str target, got {type(node.target)}")
         submod = submodules[node.target]
         submod_type = getattr(submod, "_base_class_origin", type(submod))
         return get_acc_ops_name(submod_type)
@@ -63,8 +81,10 @@ def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.No
             else _get_qualified_name(target)
         )
     else:
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"Expected str target, got {type(node.target)}")
         return node.target
+
 
 @compatibility(is_backward_compatible=False)
 def is_node_output_tensor(node: torch.fx.Node) -> bool:
@@ -77,6 +97,7 @@ def is_node_output_tensor(node: torch.fx.Node) -> bool:
     type_ = node.meta.get("type", None)
     return type_ is not None and issubclass(type_, torch.Tensor)
 
+
 @compatibility(is_backward_compatible=False)
 class FxNetAccFusionsFinder:
     """
@@ -88,6 +109,7 @@ class FxNetAccFusionsFinder:
         self.module = module
         self.nodes = list(module.graph.nodes)
         self.acc_nodes = acc_nodes
+        self.node_index = {node: i for i, node in enumerate(self.nodes)}
 
     @dataclass
     class FusionGroup:
@@ -144,7 +166,7 @@ class FxNetAccFusionsFinder:
 
             # If the node has smaller idx, it's already an upstream node of the fusion
             # group. We don't need to check it anymore.
-            if self.nodes.index(arg) < fusion_group.top_node_idx:
+            if self.node_index[arg] < fusion_group.top_node_idx:
                 continue
 
             # If the node is in the fusion group, return True.
@@ -159,8 +181,8 @@ class FxNetAccFusionsFinder:
 
         return False
 
-    def __call__(self) -> Dict[torch.fx.Node, NodeSet]:
-        result: Dict[torch.fx.Node, NodeSet] = {}
+    def __call__(self) -> dict[torch.fx.Node, NodeSet]:
+        result: dict[torch.fx.Node, NodeSet] = {}
         acc_nodes = list(self.acc_nodes)
 
         for node in acc_nodes:
@@ -174,7 +196,7 @@ class FxNetAccFusionsFinder:
                 continue
 
             fusion_group: FxNetAccFusionsFinder.FusionGroup = self.FusionGroup(
-                top_node_idx=self.nodes.index(node),
+                top_node_idx=self.node_index[node],
                 nodes={node},
                 inputs=set(node.all_input_nodes),
                 nodes_need_process={node},
@@ -213,7 +235,7 @@ class FxNetAccFusionsFinder:
 
                     fusion_group.add_node(arg)
                     fusion_group.top_node_idx = min(
-                        fusion_group.top_node_idx, self.nodes.index(arg)
+                        fusion_group.top_node_idx, self.node_index[arg]
                     )
                     self.recursive_add_node(
                         fusion_group,
@@ -244,6 +266,10 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
     Returns:
         The graph module in-place sorted
+
+    Warning:
+        This topological sort is NOT stable, it will NOT preserve the original node order.
+        If you need a stable topological sort, use stable_topological_sort instead.
     """
 
     # These operators are used for making runtime assertions before any
@@ -281,7 +307,7 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
         if indeg[node] == 0:
             queue.append(node)
-    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+    env: dict[torch.fx.Node, torch.fx.Node] = {}
     # Pop nodes from the queue, and add nodes that have had all their
     # dependencies fulfilled
     while len(queue) > 0:
@@ -297,7 +323,75 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     # If the new graph's size is not as large as the old one, then there must be
     # a cycle (i.e. some node's dependencies were not satisfied.)
     if len(new_graph.nodes) < len(gm.graph.nodes):
-        raise RuntimeError(f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}")
+        raise RuntimeError(
+            f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}"
+        )
+    new_graph._codegen = gm.graph._codegen
+    gm.graph = new_graph
+    return gm
+
+
+@compatibility(is_backward_compatible=False)
+def stable_topological_sort(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """
+    Replace the graph of the given GraphModule with one that contains the same nodes as the
+    original, but in topologically sorted order while preserving the original node order
+    as much as possible.
+
+    This function performs a stable topological sort where nodes appear in an order that:
+    1. Respects data dependencies (topological ordering)
+    2. Preserves the original node order when there are no dependency constraints
+
+    The algorithm uses Kahn's algorithm with a priority queue: nodes with all dependencies
+    satisfied are added to a min-heap, ordered by their original position. This ensures
+    we always process the earliest node in the original order among ready nodes.
+
+    Arguments:
+        gm: The graph module to topologically sort. It is modified in-place.
+
+    Returns:
+        The graph module in-place sorted
+    """
+    indeg = dict.fromkeys(gm.graph.nodes, 0)
+    new_graph = torch.fx.Graph()
+
+    # Build node to original index mapping
+    node_to_id: dict[torch.fx.Node, int] = {
+        node: idx for idx, node in enumerate(gm.graph.nodes)
+    }
+
+    # Track how many unfulfilled dependencies each node has
+    for node in gm.graph.nodes:
+        for user in node.users:
+            indeg[user] += 1
+
+    # Priority queue: (original_index, node)
+    # Use min-heap to always process the node with smallest original index
+    ready_queue: list[tuple[int, torch.fx.Node]] = []
+    for node in gm.graph.nodes:
+        if indeg[node] == 0:
+            heapq.heappush(ready_queue, (node_to_id[node], node))
+
+    env: dict[torch.fx.Node, torch.fx.Node] = {}
+
+    # Process nodes
+    while ready_queue:
+        # Pop node with smallest original index
+        _, cur = heapq.heappop(ready_queue)
+        env[cur] = new_graph.node_copy(cur, lambda x: env[x])
+
+        # Update in-degrees and add newly ready nodes
+        for user in cur.users:
+            indeg[user] -= 1
+            if indeg[user] == 0:
+                heapq.heappush(ready_queue, (node_to_id[user], user))
+
+    # Check if all nodes were processed
+    if len(new_graph.nodes) != len(gm.graph.nodes):
+        raise AssertionError(
+            f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}"
+        )
+
     new_graph._codegen = gm.graph._codegen
     gm.graph = new_graph
     return gm

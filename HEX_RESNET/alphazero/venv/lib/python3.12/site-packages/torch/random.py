@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
-from typing import Generator
+from collections.abc import Generator
 
 import torch
 from torch._C import default_generator
@@ -39,6 +39,10 @@ def manual_seed(seed) -> torch._C.Generator:
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
     """
+    return _manual_seed_impl(seed)
+
+
+def _manual_seed_impl(seed) -> torch._C.Generator:
     seed = int(seed)
     import torch.cuda
 
@@ -54,6 +58,11 @@ def manual_seed(seed) -> torch._C.Generator:
 
     if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
+
+    import torch.mtia
+
+    if not torch.mtia._is_in_bad_fork():
+        torch.mtia.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 
@@ -79,6 +88,11 @@ def seed() -> int:
 
     if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
+
+    import torch.mtia
+
+    if not torch.mtia._is_in_bad_fork():
+        torch.mtia.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 
@@ -143,9 +157,13 @@ def fork_rng(
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        device_type (str): device type str, default is `cuda`. As for custom device,
-            see details in [Note: support the custom device with privateuse1]
+        device_type (str): device type str, default is `cuda`. As for supported device,
+            see details in :ref:`accelerator<accelerators>`
     """
+
+    if device_type == "meta":
+        yield
+        return
 
     device_type = torch.device(device_type).type
     device_mod = getattr(torch, device_type, None)
@@ -180,7 +198,7 @@ def fork_rng(
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
                 f"`range(torch.{device_type}.device_count())`."
             )
-            warnings.warn(message)
+            warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
     else:

@@ -80,9 +80,9 @@ rm checkpoints/best_model.pt checkpoints/model_iter_*.pt checkpoints/replay_buff
 ### AlphaZero — `alphazero/`
 
 - **`network.py`** : ResNet 10 blocs, 128 filtres, têtes politique + valeur (~3 M params). Supporte `predict()` (single) et `batch_predict()` (batché). Inférence FP16 automatique sur GPU (torch.amp.autocast).
-- **`mcts_az.py`** : MCTS UCB-PUCT (c_puct=1.0), bruit Dirichlet à la racine (α=0.03, ε=0.25), température τ=1 pour les 20 premiers coups puis τ→0. Inférence batchée GPU avec virtual loss (16 feuilles/batch). Expansion paresseuse. Tree reuse entre coups.
-- **`self_play.py`** : Génération de parties avec tree reuse + buffer circulaire (200 000 positions).
-- **`trainer.py`** : Boucle self-play → train → évaluation. Loss = MSE(v,z) + CrossEntropy(p,π) + λ·L2. Adam lr=1e-3 + cosine annealing (→ 1e-5). Gestion des checkpoints incompatibles.
+- **`mcts_az.py`** : MCTS UCB-PUCT (c_puct=1.0), bruit Dirichlet à la racine (α=0.03, ε=0.25), température τ=1 pour les 20 premiers coups puis τ→0. Inférence batchée GPU avec virtual loss (32 feuilles/batch). Expansion paresseuse. Tree reuse entre coups. `_simulate_batch` retourne le nombre de sims utiles (gère les collisions correctement).
+- **`self_play.py`** : Self-play parallèle : `GameSlot` encapsule une partie en cours, `run_self_play` orchestre N=8 parties simultanées avec batching cross-games (batch GPU ~64 positions). Buffer circulaire (150 000 positions). Voir `self_play.txt` pour les détails d'implémentation.
+- **`trainer.py`** : Boucle self-play → train → évaluation. Loss = MSE(v,z) + CrossEntropy(p,π) + λ·L2. Adam lr=1e-3 + cosine annealing (→ 1e-5). Gestion des checkpoints incompatibles. Reset de l'optimizer Adam et du scheduler quand le modèle échoue l'évaluation et est revert à `best_model.pt`.
 - **`evaluate.py`** : Comparaison de modèles et test vs joueur aléatoire.
 - **`tournament.py`** : Tournoi full Python. Supporte `AlphaBetaPlayer`, `RandomPlayer`, `AlphaZeroPlayer`, et commandes externes via subprocess.
 
