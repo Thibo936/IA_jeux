@@ -15,7 +15,7 @@ Projet L3 (Paris 8). Six IA jouent au Hex 11×11 en **full Python** :
 ## Installation
 
 ```bash
-pip install torch numpy
+pip install torch numpy numba
 ```
 
 GPU NVIDIA (recommandé pour l'entraînement) :
