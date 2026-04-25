@@ -11,10 +11,10 @@ import sys
 import os
 import time
 
-# Ajouter le répertoire alphazero au path si appelé depuis la racine du projet
 _dir = os.path.dirname(os.path.abspath(__file__))
-if _dir not in sys.path:
-    sys.path.insert(0, _dir)
+for _p in [os.path.join(_dir, 'ia'), os.path.join(_dir, 'train')]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import numpy as np
 import torch

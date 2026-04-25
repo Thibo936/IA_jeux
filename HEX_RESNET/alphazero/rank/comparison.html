@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comparaison des classements Hex 11×11</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }
+        h1 { text-align: center; color: #00d4ff; margin-bottom: 0.5rem; font-size: 2rem; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .card { background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { padding: 0.5rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; font-size: 0.9rem; }
+        th { color: #00d4ff; font-weight: 600; }
+        tr:hover { background: #243447; }
+        .delta-pos { color: #2ecc71; font-weight: 600; }
+        .delta-neg { color: #e74c3c; font-weight: 600; }
+        .delta-zero { color: #888; }
+        .stats-row { display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+        .stat-box { background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }
+        .stat-box .value { font-size: 1.8rem; font-weight: bold; color: #00d4ff; }
+        .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+        canvas { max-height: 380px; }
+        .full-width { grid-column: 1 / -1; }
+    </style>
+</head>
+<body>
+    <h1>📈 Comparaison des classements Hex 11×11</h1>
+    <p class="subtitle">17 runs • du 03/04/2026 au 25/04/2026 • 7 IA suivies • Généré le 25/04/2026 à 06:22</p>
+
+    <div class="stats-row">
+        <div class="stat-box"><div class="value">17</div><div class="label">Runs comparés</div></div>
+        <div class="stat-box"><div class="value">7</div><div class="label">IA suivies</div></div>
+        <div class="stat-box"><div class="value">22</div><div class="label">Jours couverts</div></div>
+    </div>
+
+    <div class="grid">
+        <div class="card"><h2>📊 Évolution du score Elo</h2><canvas id="eloChart"></canvas></div>
+        <div class="card"><h2>🏅 Évolution du taux de victoire (%)</h2><canvas id="winChart"></canvas></div>
+        <div class="card"><h2>⏱️ Temps moyen par coup (s)</h2><canvas id="timeChart"></canvas></div>
+        <div class="card"><h2>🎯 Durée moyenne des parties (coups)</h2><canvas id="movesChart"></canvas></div>
+
+        <div class="card full-width">
+            <h2>📋 Récapitulatif par IA</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>IA</th><th>Premier Elo</th><th>Dernier Elo</th>
+                        <th>Δ Elo</th><th>Runs</th><th>Période</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>AlphaZero</strong></td>
+                        <td>816</td>
+                        <td>1221</td>
+                        <td class="delta-pos">+405</td>
+                        <td>17</td>
+                        <td>03/04/2026 → 25/04/2026</td>
+                    </tr>
+                    <tr>
+                        <td><strong>AlphaBeta</strong></td>
+                        <td>1097</td>
+                        <td>1220</td>
+                        <td class="delta-pos">+124</td>
+                        <td>17</td>
+                        <td>03/04/2026 → 25/04/2026</td>
+                    </tr>
+                    <tr>
+                        <td><strong>MoHex</strong></td>
+                        <td>1070</td>
+                        <td>939</td>
+                        <td class="delta-neg">-131</td>
+                        <td>6</td>
+                        <td>20/04/2026 → 25/04/2026</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Heuristic</strong></td>
+                        <td>1089</td>
+                        <td>928</td>
+                        <td class="delta-neg">-161</td>
+                        <td>17</td>
+                        <td>03/04/2026 → 25/04/2026</td>
+                    </tr>
+                    <tr>
+                        <td><strong>MCTS-Light</strong></td>
+                        <td>1083</td>
+                        <td>821</td>
+                        <td class="delta-neg">-262</td>
+                        <td>13</td>
+                        <td>03/04/2026 → 22/04/2026</td>
+                    </tr>
+                    <tr>
+                        <td><strong>MonteCarlo</strong></td>
+                        <td>1074</td>
+                        <td>802</td>
+                        <td class="delta-neg">-273</td>
+                        <td>13</td>
+                        <td>03/04/2026 → 22/04/2026</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Random</strong></td>
+                        <td>842</td>
+                        <td>693</td>
+                        <td class="delta-neg">-149</td>
+                        <td>17</td>
+                        <td>03/04/2026 → 25/04/2026</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card full-width">
+            <h2>🗂️ Runs inclus</h2>
+            <table>
+                <thead><tr><th>#</th><th>Fichier</th><th>Date</th><th>IA</th><th>Parties/matchup</th></tr></thead>
+                <tbody>
+                    <tr><td>#1</td><td>ranking_2026-04-03_1200.html</td><td>03/04/2026 12:00</td><td>6</td><td>100</td></tr>
+                    <tr><td>#2</td><td>ranking_2026-04-04_1200.html</td><td>04/04/2026 12:00</td><td>6</td><td>100</td></tr>
+                    <tr><td>#3</td><td>ranking_2026-04-05_1200.html</td><td>05/04/2026 12:00</td><td>6</td><td>100</td></tr>
+                    <tr><td>#4</td><td>ranking_2026-04-08_1200.html</td><td>08/04/2026 12:00</td><td>6</td><td>100</td></tr>
+                    <tr><td>#5</td><td>ranking_2026-04-09_1625.html</td><td>09/04/2026 16:25</td><td>6</td><td>100</td></tr>
+                    <tr><td>#6</td><td>ranking_2026-04-11_1219.html</td><td>11/04/2026 15:29</td><td>6</td><td>100</td></tr>
+                    <tr><td>#7</td><td>ranking_2026-04-12_0817.html</td><td>12/04/2026 11:28</td><td>6</td><td>100</td></tr>
+                    <tr><td>#8</td><td>ranking_2026-04-13_0431.html</td><td>13/04/2026 07:40</td><td>6</td><td>100</td></tr>
+                    <tr><td>#9</td><td>ranking_2026-04-14_0846.html</td><td>14/04/2026 12:23</td><td>6</td><td>100</td></tr>
+                    <tr><td>#10</td><td>ranking_2026-04-16_0126.html</td><td>16/04/2026 04:47</td><td>6</td><td>100</td></tr>
+                    <tr><td>#11</td><td>ranking_2026-04-17_0617.html</td><td>17/04/2026 15:22</td><td>6</td><td>100</td></tr>
+                    <tr><td>#12</td><td>ranking_2026-04-20_0810.html</td><td>20/04/2026 14:17</td><td>7</td><td>100</td></tr>
+                    <tr><td>#13</td><td>ranking_2026-04-21_2347.html</td><td>22/04/2026 05:53</td><td>7</td><td>100</td></tr>
+                    <tr><td>#14</td><td>ranking_2026-04-23_0325.html</td><td>23/04/2026 04:51</td><td>5</td><td>100</td></tr>
+                    <tr><td>#15</td><td>ranking_2026-04-23_0637.html</td><td>23/04/2026 08:02</td><td>5</td><td>100</td></tr>
+                    <tr><td>#16</td><td>ranking_2026-04-24_0512.html</td><td>24/04/2026 06:39</td><td>5</td><td>100</td></tr>
+                    <tr><td>#17</td><td>ranking_2026-04-25_0254.html</td><td>25/04/2026 04:19</td><td>5</td><td>100</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const labels = ["03/04 12:00", "04/04 12:00", "05/04 12:00", "08/04 12:00", "09/04 16:25", "11/04 15:29", "12/04 11:28", "13/04 07:40", "14/04 12:23", "16/04 04:47", "17/04 15:22", "20/04 14:17", "22/04 05:53", "23/04 04:51", "23/04 08:02", "24/04 06:39", "25/04 04:19"];
+        const fullDates = ["2026-04-03 12:00", "2026-04-04 12:00", "2026-04-05 12:00", "2026-04-08 12:00", "2026-04-09 16:25", "2026-04-11 15:29", "2026-04-12 11:28", "2026-04-13 07:40", "2026-04-14 12:23", "2026-04-16 04:47", "2026-04-17 15:22", "2026-04-20 14:17", "2026-04-22 05:53", "2026-04-23 04:51", "2026-04-23 08:02", "2026-04-24 06:39", "2026-04-25 04:19"];
+        const eloSeries = [{"label": "AlphaBeta", "data": [1096.6497984453172, 1104.0405017089095, 1105.383081437043, 1116.3385589307277, 1278.3672411208636, 1129.4235581332696, 1203.5242051580262, 1276.2305925237338, 1360.9582225089518, 1201.072001609724, 1202.386055699678, 1396.6547841150211, 1318.2686007301638, 1221.8436975140069, 1223.0416685459377, 1223.5242635019426, 1220.181585024039], "borderColor": "#e74c3c", "backgroundColor": "#e74c3c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "AlphaZero", "data": [816.0235265676009, 855.823092798464, 862.4205705594551, 928.0829517823562, 1002.5472209812121, 1180.3991244153099, 1203.4912624031733, 1124.3091191577969, 1135.2520488378584, 1275.080482169199, 1363.0219289775785, 1250.4737823690677, 1319.221467196435, 1220.7186688612267, 1212.172170766767, 1220.8228281371253, 1220.6313624728957], "borderColor": "#3498db", "backgroundColor": "#3498db33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Heuristic", "data": [1088.642601277195, 1097.4046346814487, 1098.9477580979985, 1115.5949822976484, 1280.7464439474156, 1285.9826893200477, 1208.0356108396566, 1215.5564572234566, 1137.7566707663905, 1145.0543871091006, 1069.6540270577132, 1052.6846910749668, 1057.5646384620052, 932.025173136169, 918.7031031799575, 931.8938443864299, 927.6279863157773], "borderColor": "#2ecc71", "backgroundColor": "#2ecc7133", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MCTS-Light", "data": [1082.9122258852224, 1069.6177682516368, 1051.6791728260407, 1006.952980929346, 910.54911975232, 873.2489649404325, 872.457789540981, 861.8092166911957, 870.1444931534743, 869.2164897556265, 864.2920466836737, 807.3501399359878, 820.7895412847436, null, null, null, null], "borderColor": "#9b59b6", "backgroundColor": "#9b59b633", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MoHex", "data": [null, null, null, null, null, null, null, null, null, null, null, 1070.3598186052402, 1072.2652181278863, 932.8740410219224, 953.0824998470795, 931.3528636021099, 938.8948278700453], "borderColor": "#e67e22", "backgroundColor": "#e67e2233", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MonteCarlo", "data": [1074.2248775082137, 1030.0520761801033, 1039.5212460928835, 977.2147271921776, 876.7603637487949, 878.581104098249, 865.773780246186, 873.1585500175671, 844.7894399260682, 863.902828708058, 853.4657797016215, 817.9356508782993, 801.6715625156543, null, null, null, null], "borderColor": "#1abc9c", "backgroundColor": "#1abc9c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Random", "data": [841.5469703164514, 843.0619263794378, 842.04817098658, 855.8157988677439, 651.0296104493935, 652.364559092693, 646.7173518119763, 648.9360643862502, 651.0991248072569, 645.6738106482919, 647.180161879735, 604.5411330214171, 610.2189716831136, 692.5384194666748, 693.000557660258, 692.4062003723914, 692.6642383172427], "borderColor": "#f1c40f", "backgroundColor": "#f1c40f33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}];
+        const winSeries = [{"label": "AlphaBeta", "data": [100.0, 100.0, 100.0, 99.0, 90.0, 70.0, 80.0, 90.0, 100.0, 80.0, 80.0, 99.33333333333333, 91.16666666666667, 86.75, 87.0, 87.0, 86.5], "borderColor": "#e74c3c", "backgroundColor": "#e74c3c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "AlphaZero", "data": [20.6, 26.6, 27.6, 38.4, 50.8, 77.4, 79.6, 69.0, 69.8, 89.8, 100.0, 82.0, 90.5, 86.25, 85.0, 86.25, 86.25], "borderColor": "#3498db", "backgroundColor": "#3498db33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Heuristic", "data": [100.0, 100.0, 100.0, 100.0, 90.0, 90.0, 80.0, 80.0, 70.0, 70.0, 60.0, 57.5, 57.666666666666664, 38.5, 36.25, 38.5, 37.75], "borderColor": "#2ecc71", "backgroundColor": "#2ecc7133", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MCTS-Light", "data": [97.0, 89.0, 82.0, 59.0, 36.6, 30.6, 30.6, 29.4, 31.4, 30.4, 30.4, 24.833333333333332, 26.333333333333332, null, null, null, null], "borderColor": "#9b59b6", "backgroundColor": "#9b59b633", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MoHex", "data": [null, null, null, null, null, null, null, null, null, null, null, 59.666666666666664, 59.5, 38.5, 41.75, 38.25, 39.5], "borderColor": "#e67e22", "backgroundColor": "#e67e2233", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MonteCarlo", "data": [93.0, 74.0, 77.0, 48.0, 32.0, 31.4, 29.8, 31.2, 27.8, 29.8, 29.0, 26.333333333333332, 24.0, null, null, null, null], "borderColor": "#1abc9c", "backgroundColor": "#1abc9c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Random", "data": [7.0, 4.0, 3.0, 2.0, 0.6, 0.6, 0.0, 0.4, 1.0, 0.0, 0.6, 0.3333333333333333, 0.8333333333333334, 0.0, 0.0, 0.0, 0.0], "borderColor": "#f1c40f", "backgroundColor": "#f1c40f33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}];
+        const timeSeries = [{"label": "AlphaBeta", "data": [0.0015106370139525047, 0.0014045389525292609, 0.0014033338881332062, 0.0013291325053984926, 0.0018256797417841924, 0.001798827645080858, 0.0018104577513875341, 0.004507554909314536, 0.26363575769626535, 0.2673639598876133, 3.8473730148890715, 0.2965114557375464, 0.29510802128628943, 0.2186616526216688, 0.21627225296345512, 0.218126840579512, 0.2182056769691594], "borderColor": "#e74c3c", "backgroundColor": "#e74c3c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "AlphaZero", "data": [0.03530838941169573, 0.035829683715581734, 0.039869778165076315, 0.037111317371790735, 0.12625157900877818, 0.03492217376015991, 0.03708961667383376, 0.036977431542396515, 0.024371201156146226, 0.023608802593470347, 0.03615769647247218, 0.03705204888895652, 0.03703515708484784, 0.03574757635890111, 0.03606774598747029, 0.03641192785319283, 0.03642521674097447], "borderColor": "#3498db", "backgroundColor": "#3498db33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Heuristic", "data": [0.03129294934017765, 0.03119685314594094, 0.03066933286447632, 0.029419102355468834, 0.034979710547845246, 0.032766891558339464, 0.0331549064832397, 0.034680934280323816, 0.03392956948937793, 0.03338875564862469, 0.03432014104989476, 0.03445015634080471, 0.03369106798942692, 0.03276606744042961, 0.031032367392068272, 0.032776279230839866, 0.03287635407569688], "borderColor": "#2ecc71", "backgroundColor": "#2ecc7133", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MCTS-Light", "data": [0.4877948431457442, 0.4888633273027308, 0.4902066901380403, 0.4925708288871447, 0.4969118969995289, 0.49768030468765045, 0.49771230850214865, 0.4979001278925718, 0.49767001973841307, 0.49777166962670905, 0.4979145090472301, 0.4984803159601423, 0.49832750040556806, null, null, null, null], "borderColor": "#9b59b6", "backgroundColor": "#9b59b633", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MoHex", "data": [null, null, null, null, null, null, null, null, null, null, null, 0.47063869453218027, 0.4691996135625938, 0.4661467601090778, 0.45818679347043134, 0.4639422293591941, 0.46522024876215345], "borderColor": "#e67e22", "backgroundColor": "#e67e2233", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MonteCarlo", "data": [0.4859067172484789, 0.4877806859697553, 0.49035891686236743, 0.4936854933809925, 0.4950920988914645, 0.49526222815996984, 0.4954395854950087, 0.49548698767724875, 0.4960090203683948, 0.495547546313611, 0.49559876774582545, 0.4963347745892755, 0.49679155747085524, null, null, null, null], "borderColor": "#1abc9c", "backgroundColor": "#1abc9c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Random", "data": [2.254640601616627e-05, 2.3034794467389387e-05, 2.2724875968117884e-05, 2.152867367029791e-05, 1.915600120368334e-05, 1.8065382570950373e-05, 1.6493316332380273e-05, 1.5878401470337964e-05, 2.2539815790826848e-05, 1.7038745377382658e-05, 2.1331495421006695e-05, 1.8562254293401856e-05, 1.890495826468621e-05, 3.063676881701685e-05, 3.338619866462319e-05, 2.2494190179458832e-05, 3.077251410030569e-05], "borderColor": "#f1c40f", "backgroundColor": "#f1c40f33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}];
+        const movesSeries = [{"label": "AlphaBeta", "data": [22.46, 23.36, 30.68, 37.59, 26.96, 24.836, 24.036, 22.884, 24.056, 22.828, 23.132, 24.763333333333332, 26.151666666666667, 25.0225, 25.01, 28.18, 27.655], "borderColor": "#e74c3c", "backgroundColor": "#e74c3c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "AlphaZero", "data": [56.282, 53.946, 58.36, 52.772, 48.284, 37.122, 35.436, 33.038, 40.638, 30.01, 26.992, 24.203333333333333, 27.798333333333332, 28.6125, 28.8, 29.3125, 27.4175], "borderColor": "#3498db", "backgroundColor": "#3498db33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Heuristic", "data": [24.06, 24.62, 28.74, 32.56, 26.2, 27.136, 27.28, 25.436, 30.112, 30.788, 27.252, 26.315, 28.37, 29.98, 30.2675, 27.945, 26.8425], "borderColor": "#2ecc71", "backgroundColor": "#2ecc7133", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MCTS-Light", "data": [72.23, 71.09, 72.12, 63.79, 49.094, 45.29, 45.218, 45.07, 44.526, 41.952, 41.552, 43.435, 43.70666666666666, null, null, null, null], "borderColor": "#9b59b6", "backgroundColor": "#9b59b633", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MoHex", "data": [null, null, null, null, null, null, null, null, null, null, null, 45.663333333333334, 44.88166666666667, 39.2, 39.2275, 39.7175, 38.57], "borderColor": "#e67e22", "backgroundColor": "#e67e2233", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "MonteCarlo", "data": [68.93, 65.3, 73.91, 58.86, 45.66, 42.966, 42.834, 42.624, 44.706, 40.43, 40.286, 43.21, 43.196666666666665, null, null, null, null], "borderColor": "#1abc9c", "backgroundColor": "#1abc9c33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}, {"label": "Random", "data": [93.73, 85.36, 86.35, 71.06, 48.69, 45.246, 44.268, 44.2, 44.614, 41.94, 41.814, 44.406666666666666, 44.04833333333333, 31.305, 31.1, 31.74, 31.135], "borderColor": "#f1c40f", "backgroundColor": "#f1c40f33", "tension": 0.25, "spanGaps": true, "pointRadius": 4, "borderWidth": 2}];
+
+        const baseOpts = {
+            responsive: true,
+            interaction: { mode: 'nearest', intersect: false },
+            plugins: {
+                legend: { labels: { color: '#e0e0e0', boxWidth: 12 } },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => fullDates[items[0].dataIndex]
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+                y: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } }
+            }
+        };
+
+        function makeChart(id, datasets, yMax) {
+            const opts = JSON.parse(JSON.stringify(baseOpts));
+            if (yMax !== undefined) opts.scales.y.max = yMax;
+            opts.plugins.legend.labels.color = '#e0e0e0';
+            new Chart(document.getElementById(id), {
+                type: 'line',
+                data: { labels: labels, datasets: datasets },
+                options: opts
+            });
+        }
+
+        makeChart('eloChart', eloSeries);
+        makeChart('winChart', winSeries, 100);
+        makeChart('timeChart', timeSeries);
+        makeChart('movesChart', movesSeries);
+    </script>
+</body>
+</html>

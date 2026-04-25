@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classement AlphaZero Hex 11×11</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }
+        h1 { text-align: center; color: #e74c3c; margin-bottom: 0.5rem; font-size: 2rem; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .card { background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .card h2 { color: #e74c3c; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; font-size: 0.85rem; word-break: break-all; }
+        th { color: #e74c3c; font-weight: 600; }
+        tr:hover { background: #243447; }
+        .rank-1 { color: #ffd700; font-weight: bold; }
+        .rank-2 { color: #c0c0c0; font-weight: bold; }
+        .rank-3 { color: #cd7f32; font-weight: bold; }
+        .heatmap { display: grid; gap: 2px; margin-top: 1rem; overflow-x: auto; }
+        .heatmap-cell { padding: 0.4rem; text-align: center; font-size: 0.7rem; border-radius: 3px; }
+        .heatmap-header { font-weight: 600; color: #e74c3c; font-size: 0.65rem; word-break: break-all; }
+        .stats-row { display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+        .stat-box { background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }
+        .stat-box .value { font-size: 1.8rem; font-weight: bold; color: #e74c3c; }
+        .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+        canvas { max-height: 350px; }
+        .full-width { grid-column: 1 / -1; }
+    </style>
+</head>
+<body>
+    <h1>AlphaZero — Classement des modèles Hex 11×11</h1>
+    <p class="subtitle">Tournoi round-robin • 5 modèles • 10 matchups • 100 parties/matchup • 400 sims/coup • Généré le 21/04/2026 à 23:47</p>
+
+    <div class="stats-row">
+        <div class="stat-box"><div class="value">5</div><div class="label">Modèles</div></div>
+        <div class="stat-box"><div class="value">10</div><div class="label">Matchups</div></div>
+        <div class="stat-box"><div class="value">1000</div><div class="label">Parties totales</div></div>
+        <div class="stat-box"><div class="value">4410s</div><div class="label">Temps total</div></div>
+        <div class="stat-box"><div class="value">400</div><div class="label">Sims/coup</div></div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Score Elo</h2>
+            <canvas id="eloChart"></canvas>
+        </div>
+        <div class="card">
+            <h2>Taux de Victoire (%)</h2>
+            <canvas id="winChart"></canvas>
+        </div>
+        <div class="card">
+            <h2>Temps moyen par coup (s)</h2>
+            <canvas id="timeChart"></canvas>
+        </div>
+        <div class="card">
+            <h2>Durée moyenne des parties (coups)</h2>
+            <canvas id="movesChart"></canvas>
+        </div>
+        <div class="card full-width">
+            <h2>Matrice des confrontations (taux de victoire en ligne vs colonne)</h2>
+            <div id="heatmap" class="heatmap"></div>
+        </div>
+        <div class="card full-width">
+            <h2>Classement détaillé</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rang</th><th>Modèle</th><th>Elo</th>
+                        <th>Victoires</th><th>Parties</th><th>Win%</th>
+                        <th>Temps moy./coup</th><th>Coups moy./partie</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="rank-1">#1</td>
+                        <td>best_model_22_04</td>
+                        <td>1145</td>
+                        <td>300</td><td>400</td><td>75.0%</td>
+                        <td>0.141s</td><td>34.5</td>
+                    </tr>
+                    <tr>
+                        <td class="rank-2">#2</td>
+                        <td>best_model_18_04</td>
+                        <td>1077</td>
+                        <td>250</td><td>400</td><td>62.5%</td>
+                        <td>0.141s</td><td>34.6</td>
+                    </tr>
+                    <tr>
+                        <td class="rank-3">#3</td>
+                        <td>best_model18_04_2</td>
+                        <td>1073</td>
+                        <td>250</td><td>400</td><td>62.5%</td>
+                        <td>0.139s</td><td>27.1</td>
+                    </tr>
+                    <tr>
+                        <td class="">#4</td>
+                        <td>best_model_17_04</td>
+                        <td>1002</td>
+                        <td>200</td><td>400</td><td>50.0%</td>
+                        <td>0.143s</td><td>33.5</td>
+                    </tr>
+                    <tr>
+                        <td class="">#5</td>
+                        <td>best_model_08_04</td>
+                        <td>703</td>
+                        <td>0</td><td>400</td><td>0.0%</td>
+                        <td>0.145s</td><td>25.5</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const names = ["best_model_22_04", "best_model_18_04", "best_model18_04_2", "best_model_17_04", "best_model_08_04"];
+        const eloData = [1144.8469681865797, 1076.9657303490549, 1072.5837469927594, 1002.3109095523628, 703.2926449192421];
+        const winData = [75.0, 62.5, 62.5, 50.0, 0.0];
+        const timeData = [0.14052814953236076, 0.14069941863217839, 0.13927542782499308, 0.14303247408674724, 0.1453539688815172];
+        const movesData = [34.5, 34.625, 27.125, 33.5, 25.5];
+        const barColors = ["#e74c3c", "#3498db", "#2ecc71", "#9b59b6", "#e67e22"];
+
+        const chartOpts = {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+                y: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 11 } } }
+            }
+        };
+
+        new Chart(document.getElementById('eloChart'), {
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: eloData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: chartOpts
+        });
+        new Chart(document.getElementById('winChart'), {
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: winData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: { ...chartOpts, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, max: 100 } } }
+        });
+        new Chart(document.getElementById('timeChart'), {
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: timeData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: chartOpts
+        });
+        new Chart(document.getElementById('movesChart'), {
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: movesData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: chartOpts
+        });
+
+        // Heatmap
+        const matrix = [[null, 0.5, 0.5, 1.0, 1.0], [0.5, null, 0.5, 0.5, 1.0], [0.5, 0.5, null, 0.5, 1.0], [0.0, 0.5, 0.5, null, 1.0], [0.0, 0.0, 0.0, 0.0, null]];
+        const heatmapEl = document.getElementById('heatmap');
+        const size = names.length;
+        heatmapEl.style.gridTemplateColumns = `100px repeat(${size}, 1fr)`;
+
+        heatmapEl.innerHTML = '<div class="heatmap-header"></div>';
+        names.forEach(n => {
+            heatmapEl.innerHTML += `<div class="heatmap-header" style="writing-mode:vertical-lr;text-orientation:mixed;transform:rotate(180deg)">${n}</div>`;
+        });
+
+        matrix.forEach((row, i) => {
+            heatmapEl.innerHTML += `<div class="heatmap-header">${names[i]}</div>`;
+            row.forEach((val, j) => {
+                if (val === null) {
+                    heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:#1a2634">-</div>`;
+                } else {
+                    const pct = (val * 100).toFixed(0);
+                    const r = Math.round(255 * (1 - val));
+                    const g = Math.round(255 * val);
+                    heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

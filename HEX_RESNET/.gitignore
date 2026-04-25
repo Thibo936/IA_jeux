@@ -17,8 +17,8 @@ alphazero/checkpoints/replay_buffer.npz
 # Pour ignorer aussi : alphazero/checkpoints/best_model.pt
 
 # Résultats de tournois / rankings (générés automatiquement)
-alphazero/rank/
-alphazero/model_rank/
+# alphazero/rank/
+# alphazero/model_rank/
 
 # Fichiers swap / temporaires
 *.swp

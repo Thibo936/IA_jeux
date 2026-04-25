@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classement Hex 11×11 — Tournoi Round-Robin</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }
+        h1 { text-align: center; color: #00d4ff; margin-bottom: 0.5rem; font-size: 2rem; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .card { background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; }
+        th { color: #00d4ff; font-weight: 600; }
+        tr:hover { background: #243447; }
+        .rank-1 { color: #ffd700; font-weight: bold; }
+        .rank-2 { color: #c0c0c0; font-weight: bold; }
+        .rank-3 { color: #cd7f32; font-weight: bold; }
+        .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+        .heatmap { display: grid; gap: 2px; margin-top: 1rem; }
+        .heatmap-cell { padding: 0.4rem; text-align: center; font-size: 0.75rem; border-radius: 3px; }
+        .heatmap-header { font-weight: 600; color: #00d4ff; font-size: 0.7rem; }
+        .stats-row { display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+        .stat-box { background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }
+        .stat-box .value { font-size: 1.8rem; font-weight: bold; color: #00d4ff; }
+        .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+        canvas { max-height: 350px; }
+        .full-width { grid-column: 1 / -1; }
+    </style>
+</head>
+<body>
+    <h1>🏆 Classement Hex 11×11</h1>
+    <p class="subtitle">Tournoi round-robin • 6 IA • 15 matchups • 100 parties/matchup • Généré le 16/04/2026 à 04:47</p>
+
+    <div class="stats-row">
+        <div class="stat-box"><div class="value">6</div><div class="label">Intelligence Artificielles</div></div>
+        <div class="stat-box"><div class="value">15</div><div class="label">Matchups</div></div>
+        <div class="stat-box"><div class="value">1500</div><div class="label">Parties totales</div></div>
+        <div class="stat-box"><div class="value">12090s</div><div class="label">Temps total</div></div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>📊 Classement Elo</h2>
+            <canvas id="eloChart"></canvas>
+        </div>
+        <div class="card">
+            <h2>🏅 Taux de Victoire (%)</h2>
+            <canvas id="winChart"></canvas>
+        </div>
+        <div class="card">
+            <h2>⏱️ Temps moyen par coup (s)</h2>
+            <canvas id="timeChart"></canvas>
+        </div>
+        <div class="card">
+            <h2>🎯 Durée moyenne des parties (coups)</h2>
+            <canvas id="movesChart"></canvas>
+        </div>
+        <div class="card full-width">
+            <h2>🔥 Matrice des confrontations (taux de victoire)</h2>
+            <div id="heatmap" class="heatmap"></div>
+        </div>
+        <div class="card full-width">
+            <h2>📋 Classement détaillé</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rang</th><th>IA</th><th>Type</th><th>Elo</th>
+                        <th>Victoires</th><th>Parties</th><th>Win%</th>
+                        <th>Temps moy./coup</th><th>Coups moy./partie</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="rank-1">#1</td>
+                        <td>AlphaZero</td>
+                        <td><span class="badge" style="background:#e74c3c20;color:#e74c3c;border:1px solid #e74c3c40">AlphaZero</span></td>
+                        <td>1275</td>
+                        <td>449</td><td>500</td><td>89.8%</td>
+                        <td>0.024s</td><td>30.0</td>
+                    </tr>
+                    <tr>
+                        <td class="rank-2">#2</td>
+                        <td>AlphaBeta</td>
+                        <td><span class="badge" style="background:#3498db20;color:#3498db;border:1px solid #3498db40">Alpha-Beta</span></td>
+                        <td>1201</td>
+                        <td>400</td><td>500</td><td>80.0%</td>
+                        <td>0.267s</td><td>22.8</td>
+                    </tr>
+                    <tr>
+                        <td class="rank-3">#3</td>
+                        <td>Heuristic</td>
+                        <td><span class="badge" style="background:#9b59b620;color:#9b59b6;border:1px solid #9b59b640">Heuristique</span></td>
+                        <td>1145</td>
+                        <td>350</td><td>500</td><td>70.0%</td>
+                        <td>0.033s</td><td>30.8</td>
+                    </tr>
+                    <tr>
+                        <td class="">#4</td>
+                        <td>MCTS-Light</td>
+                        <td><span class="badge" style="background:#2ecc7120;color:#2ecc71;border:1px solid #2ecc7140">MCTS</span></td>
+                        <td>869</td>
+                        <td>152</td><td>500</td><td>30.4%</td>
+                        <td>0.498s</td><td>42.0</td>
+                    </tr>
+                    <tr>
+                        <td class="">#5</td>
+                        <td>MonteCarlo</td>
+                        <td><span class="badge" style="background:#e67e2220;color:#e67e22;border:1px solid #e67e2240">Monte Carlo</span></td>
+                        <td>864</td>
+                        <td>149</td><td>500</td><td>29.8%</td>
+                        <td>0.496s</td><td>40.4</td>
+                    </tr>
+                    <tr>
+                        <td class="">#6</td>
+                        <td>Random</td>
+                        <td><span class="badge" style="background:#95a5a620;color:#95a5a6;border:1px solid #95a5a640">Random</span></td>
+                        <td>646</td>
+                        <td>0</td><td>500</td><td>0.0%</td>
+                        <td>0.000s</td><td>41.9</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const names = ["AlphaZero", "AlphaBeta", "Heuristic", "MCTS-Light", "MonteCarlo", "Random"];
+        const eloData = [1275.080482169199, 1201.072001609724, 1145.0543871091006, 869.2164897556265, 863.902828708058, 645.6738106482919];
+        const winData = [89.8, 80.0, 70.0, 30.4, 29.8, 0.0];
+        const timeData = [0.023608802593470347, 0.2673639598876133, 0.03338875564862469, 0.49777166962670905, 0.495547546313611, 1.7038745377382658e-05];
+        const movesData = [30.01, 22.828, 30.788, 41.952, 40.43, 41.94];
+        const barColors = ["#e74c3c", "#3498db", "#9b59b6", "#2ecc71", "#e67e22", "#95a5a6"];
+
+        const chartOpts = {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } }, y: { grid: { display: false }, ticks: { color: '#e0e0e0' } } }
+        };
+
+        new Chart(document.getElementById('eloChart'), {
+            type: 'bar', data: { labels: names, datasets: [{ data: eloData, backgroundColor: barColors, borderRadius: 6 }] }, options: chartOpts
+        });
+        new Chart(document.getElementById('winChart'), {
+            type: 'bar', data: { labels: names, datasets: [{ data: winData, backgroundColor: barColors, borderRadius: 6 }] }, options: { ...chartOpts, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, max: 100 } } }
+        });
+        new Chart(document.getElementById('timeChart'), {
+            type: 'bar', data: { labels: names, datasets: [{ data: timeData, backgroundColor: barColors, borderRadius: 6 }] }, options: chartOpts
+        });
+        new Chart(document.getElementById('movesChart'), {
+            type: 'bar', data: { labels: names, datasets: [{ data: movesData, backgroundColor: barColors, borderRadius: 6 }] }, options: chartOpts
+        });
+
+        // Heatmap
+        const matrix = [[null, 1.0, 0.5, 1.0, 0.99, 1.0], [0.0, null, 1.0, 1.0, 1.0, 1.0], [0.5, 0.0, null, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, null, 0.52, 1.0], [0.01, 0.0, 0.0, 0.48, null, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0, null]];
+        const heatmapEl = document.getElementById('heatmap');
+        const size = names.length;
+        heatmapEl.style.gridTemplateColumns = `80px repeat(${size}, 1fr)`;
+
+        // Header row
+        heatmapEl.innerHTML = '<div class="heatmap-header"></div>';
+        names.forEach(n => {
+            heatmapEl.innerHTML += `<div class="heatmap-header" style="writing-mode:vertical-lr;text-orientation:mixed;transform:rotate(180deg)">${n}</div>`;
+        });
+
+        matrix.forEach((row, i) => {
+            heatmapEl.innerHTML += `<div class="heatmap-header">${names[i]}</div>`;
+            row.forEach((val, j) => {
+                if (val === null) {
+                    heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:#1a2634">-</div>`;
+                } else {
+                    const pct = (val * 100).toFixed(0);
+                    const r = Math.round(255 * (1 - val));
+                    const g = Math.round(255 * val);
+                    heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
+                }
+            });
+        });
+    </script>
+</body>
+</html>
