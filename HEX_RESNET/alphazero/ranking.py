@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """
-ranking.py — Tournoi round-robin entre TOUTES les IA Hex 11×11.
+ranking.py — Tournoi round-robin unifié Hex 11×11.
 
-IA supportées : random, alphabeta, mc_pure, mcts_light, heuristic, mohex, alphazero
+Fait jouer ensemble dans un même round-robin :
+  - Les IA classiques  : random, alphabeta, mc_pure, mcts_light, heuristic, mohex
+  - L'AlphaZero "best" : checkpoints/best_model.pt
+  - Toutes les variantes historiques : .pt du dossier model/
+
+Toutes les IA exposent la même interface select_move(env, time_s) ; les
+variantes AlphaZero sont enrobées via tournament.AlphaZeroPlayer (un .pt
+arbitraire passé en model_path).
 
 Usage :
-  python ranking.py                          # défaut : 100 parties/matchup
-  python ranking.py --games 50               # plus rapide
-  python ranking.py --output classement.html # fichier de sortie personnalisé
-  python ranking.py --no-html                # sortie texte uniquement
-  python ranking.py --workers 4              # parallélise les matchups
+  python ranking.py                          # tout par défaut, 20 parties/matchup
+  python ranking.py --games 50               # 50 parties/matchup
+  python ranking.py --no-models              # sans les .pt de model/
+  python ranking.py --no-classics            # tournoi 100% AlphaZero
+  python ranking.py --ias random alphabeta   # seulement ces classiques
+  python ranking.py --add path/foo.pt        # ajout explicite d'un .pt
+  python ranking.py --workers 2 --game-threads 2
 """
 
 import os
@@ -20,9 +29,11 @@ import time
 import json
 import io
 import contextlib
+from copy import deepcopy
+from dataclasses import dataclass, field
 from itertools import combinations
 from datetime import datetime
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import torch
 import numpy as np
@@ -33,492 +44,555 @@ for _p in [_dir, os.path.join(_dir, 'ia'), os.path.join(_dir, 'train')]:
         sys.path.insert(0, _p)
 
 from hex_env import HexEnv
-from config import NUM_CELLS
+from config import NUM_CELLS, BEST_MODEL_FILE
 
-# ─── Import des joueurs ───────────────────────────────────────────────────────
 
-def get_player(name: str, device: torch.device = None, sims: int = 100):
-    """Retourne une instance de joueur avec l'interface select_move(env, time_s)."""
-    n = name.lower()
+# ─── Constantes & catégorisation ─────────────────────────────────────────────
 
+DEFAULT_CLASSICS = ['random', 'alphabeta', 'mc_pure', 'mcts_light', 'heuristic', 'mohex']
+
+CLASSIC_DISPLAY = {
+    'random':     'Random',
+    'alphabeta':  'AlphaBeta',
+    'mc_pure':    'MonteCarlo',
+    'montecarlo': 'MonteCarlo',
+    'mcts_light': 'MCTS-Light',
+    'mcts':       'MCTS-Light',
+    'heuristic':  'Heuristic',
+    'mohex':      'MoHex',
+}
+
+CLASSIC_TYPE = {
+    'random':     'Random',
+    'alphabeta':  'Alpha-Beta',
+    'mc_pure':    'Monte Carlo',
+    'montecarlo': 'Monte Carlo',
+    'mcts_light': 'MCTS',
+    'mcts':       'MCTS',
+    'heuristic':  'Heuristique',
+    'mohex':      'MoHex',
+}
+
+TIME_PER_MOVE = 0.5   # patché par args.time dans main()
+
+
+# ─── Joueurs classiques ──────────────────────────────────────────────────────
+
+def _make_classic(classic_id: str):
+    """Instancie une IA classique. Lève ValueError si inconnue."""
+    n = classic_id.lower()
     if n == 'random':
         from random_player import RandomPlayer
         return RandomPlayer()
-
     if n == 'alphabeta':
         from alphabeta import AlphaBetaPlayer
         return AlphaBetaPlayer()
-
     if n in ('mc_pure', 'montecarlo'):
         from monte_carlo_pure import PureMonteCarloPlayer
         return PureMonteCarloPlayer()
-
     if n in ('mcts_light', 'mcts'):
         from mcts_light import LightMCTSPlayer
         return LightMCTSPlayer()
-
     if n == 'heuristic':
         from heuristic_player import HeuristicPlayer
         return HeuristicPlayer()
-
     if n == 'mohex':
         from mohex import MoHexPlayer
         return MoHexPlayer()
-
-    if n == 'alphazero':
-        from tournament import AlphaZeroPlayer
-        return AlphaZeroPlayer(device=device, sims=sims)
-
-    return None
+    raise ValueError(f"IA classique inconnue : {classic_id}")
 
 
-def get_player_name(name: str) -> str:
-    """Retourne un nom lisible pour l'affichage."""
-    mapping = {
-        'random': 'Random',
-        'alphabeta': 'AlphaBeta',
-        'mc_pure': 'MonteCarlo',
-        'montecarlo': 'MonteCarlo',
-        'mcts_light': 'MCTS-Light',
-        'mcts': 'MCTS-Light',
-        'heuristic': 'Heuristic',
-        'mohex': 'MoHex',
-        'alphazero': 'AlphaZero',
-    }
-    n = name.lower()
-    if n in mapping:
-        return mapping[n]
-    return name
+# ─── Découverte des modèles AlphaZero ────────────────────────────────────────
 
-
-def get_player_type(name: str) -> str:
-    """Catégorie du joueur."""
-    n = name.lower()
-    if n == 'random':
-        return 'Random'
-    if n == 'alphabeta':
-        return 'Alpha-Beta'
-    if n in ('mc_pure', 'montecarlo'):
-        return 'Monte Carlo'
-    if n in ('mcts_light', 'mcts'):
-        return 'MCTS'
-    if n == 'heuristic':
-        return 'Heuristique'
-    if n == 'mohex':
-        return 'MoHex'
-    if n == 'alphazero':
-        return 'AlphaZero'
-    return 'Inconnu'
-
-
-# ─── Partie ───────────────────────────────────────────────────────────────────
-
-TIME_PER_MOVE = 0.5  # secondes par coup
-
-
-def play_game(player_a, player_b, game_id: int) -> dict:
+def _az_name_from_path(path: str) -> str:
     """
-    Joue une partie entre player_a et player_b.
-    Retourne un dict avec les stats de la partie.
+    Stratégie de nommage déterministe pour un .pt AlphaZero.
+      checkpoints/best_model.pt          → AZ-best
+      model/best_model_17_04.pt          → AZ-17_04
+      model/best_model_24_04_branch_22.pt → AZ-24_04_branch_22
+      autre.pt                           → AZ-autre
     """
+    base = os.path.splitext(os.path.basename(path))[0]
+    if base == 'best_model':
+        return 'AZ-best'
+    if base.startswith('best_model_'):
+        return 'AZ-' + base[len('best_model_'):]
+    return 'AZ-' + base
+
+
+def discover_alphazero_models(model_dir: str) -> list[tuple[str, str]]:
+    """Liste [(name, abs_path), ...] des .pt du dossier (vide si dossier absent)."""
+    if not os.path.isdir(model_dir):
+        print(f"WARN : dossier de modèles introuvable : {model_dir}", file=sys.stderr)
+        return []
+    pts = sorted(f for f in os.listdir(model_dir) if f.endswith('.pt'))
+    return [(_az_name_from_path(f), os.path.abspath(os.path.join(model_dir, f)))
+            for f in pts]
+
+
+# ─── Registre des joueurs ────────────────────────────────────────────────────
+
+@dataclass
+class PlayerEntry:
+    key: str                          # nom unique (display + CSV)
+    family: str                       # 'classic' | 'alphazero'
+    type: str                         # 'Random', 'AlphaZero', etc.
+    classic_id: str | None = None     # 'random', 'mc_pure', ... (si classic)
+    source_path: str | None = None    # chemin .pt absolu (si alphazero)
+    player: object = field(default=None)
+
+
+def build_player_registry(args) -> list[PlayerEntry]:
+    """Construit le registre dédupliqué (pas encore de chargement)."""
+    entries: list[PlayerEntry] = []
+    seen_keys: set[str] = set()
+    seen_paths: set[str] = set()
+
+    def _unique_key(base: str) -> str:
+        if base not in seen_keys:
+            return base
+        i = 2
+        while f"{base}_{i}" in seen_keys:
+            i += 1
+        return f"{base}_{i}"
+
+    def _add(entry: PlayerEntry) -> None:
+        if entry.source_path:
+            ap = os.path.abspath(entry.source_path)
+            if ap in seen_paths:
+                return
+            seen_paths.add(ap)
+            entry.source_path = ap
+        entry.key = _unique_key(entry.key)
+        seen_keys.add(entry.key)
+        entries.append(entry)
+
+    # 1. Classiques
+    if not args.no_classics:
+        ias = args.ias if args.ias else DEFAULT_CLASSICS
+        for ia in ias:
+            n = ia.lower()
+            display = CLASSIC_DISPLAY.get(n, ia)
+            ptype = CLASSIC_TYPE.get(n, 'Inconnu')
+            _add(PlayerEntry(key=display, family='classic',
+                             type=ptype, classic_id=n))
+
+    # 2. best_model.pt (depuis BEST_MODEL_FILE)
+    if not args.no_best:
+        bp = os.path.join(_dir, BEST_MODEL_FILE)
+        if not os.path.isfile(bp):
+            bp = BEST_MODEL_FILE
+        if os.path.isfile(bp):
+            _add(PlayerEntry(key='AZ-best', family='alphazero',
+                             type='AlphaZero', source_path=bp))
+        else:
+            print(f"WARN : best_model introuvable ({BEST_MODEL_FILE}), skip.",
+                  file=sys.stderr)
+
+    # 3. .pt du dossier model/
+    if not args.no_models:
+        for name, path in discover_alphazero_models(args.model_dir):
+            _add(PlayerEntry(key=name, family='alphazero',
+                             type='AlphaZero', source_path=path))
+
+    # 4. --add
+    for p in args.add or []:
+        if p.lower() in ('best', 'best_model', 'best_model.pt'):
+            ap = os.path.join(_dir, BEST_MODEL_FILE)
+            if not os.path.isfile(ap):
+                ap = BEST_MODEL_FILE
+        else:
+            ap = p
+        if not os.path.isfile(ap):
+            alt = os.path.join(_dir, ap)
+            if os.path.isfile(alt):
+                ap = alt
+            else:
+                print(f"WARN : --add ignoré (introuvable) : {p}", file=sys.stderr)
+                continue
+        _add(PlayerEntry(key=_az_name_from_path(ap), family='alphazero',
+                         type='AlphaZero', source_path=ap))
+
+    return entries
+
+
+def instantiate_players(entries: list[PlayerEntry], device, sims: int) -> list[PlayerEntry]:
+    """Charge chaque joueur. Skip ceux qui échouent à l'init."""
+    from tournament import AlphaZeroPlayer
+    valid: list[PlayerEntry] = []
+    for e in entries:
+        try:
+            if e.family == 'classic':
+                e.player = _make_classic(e.classic_id)
+            else:
+                e.player = AlphaZeroPlayer(model_path=e.source_path,
+                                           device=device, sims=sims)
+        except Exception as exc:
+            print(f"  SKIP {e.key:<28} ({type(exc).__name__}: {exc})",
+                  file=sys.stderr)
+            continue
+        suffix = f" ← {os.path.relpath(e.source_path, _dir)}" if e.source_path else ""
+        print(f"  OK   {e.key:<28} [{e.type}]{suffix}")
+        valid.append(e)
+    return valid
+
+
+# ─── Partie ──────────────────────────────────────────────────────────────────
+
+def play_game(player_blue, player_red, game_id: int) -> dict:
+    """Joue une partie. player_blue joue Blue, player_red joue Red."""
     env = HexEnv()
-    moves = []
-    times_a = []
-    times_b = []
-    winner = None
+    times_blue: list[float] = []
+    times_red: list[float] = []
+    total_moves = 0
+    winner: str | None = None
     t_start = time.time()
 
     while not env.is_terminal():
-        cur = player_a if env.blue_to_play else player_b
+        cur = player_blue if env.blue_to_play else player_red
         t0 = time.time()
-        # Les IA peuvent imprimer des stats par coup sur stderr: on les masque
-        # pour garder une sortie tournoi lisible.
         with contextlib.redirect_stderr(io.StringIO()):
             move = cur.select_move(env, TIME_PER_MOVE)
         elapsed = time.time() - t0
 
         if env.blue_to_play:
-            times_a.append(elapsed)
+            times_blue.append(elapsed)
         else:
-            times_b.append(elapsed)
+            times_red.append(elapsed)
 
         if move < 0 or move >= NUM_CELLS:
-            # Coup invalide → l'autre joueur gagne
             winner = 'red' if env.blue_to_play else 'blue'
             break
-
         r, c = divmod(move, 11)
         if env.blue[r, c] or env.red[r, c]:
             winner = 'red' if env.blue_to_play else 'blue'
             break
 
         env.apply_move(move)
-        moves.append({
-            'turn': len(moves) + 1,
-            'player': 'blue' if env.blue_to_play else 'red',  # après apply, c'est l'autre
-            'move': env.pos_to_str(move),
-            'time': elapsed,
-        })
+        total_moves += 1
 
     if winner is None:
         winner = env.winner()
 
-    total_time = time.time() - t_start
-    avg_time_a = np.mean(times_a) if times_a else 0
-    avg_time_b = np.mean(times_b) if times_b else 0
-
     return {
-        'game_id': game_id,
-        'winner': winner,
-        'total_moves': len(moves),
-        'total_time': total_time,
-        'avg_time_blue': avg_time_a,
-        'avg_time_red': avg_time_b,
-        'moves': moves,
+        'game_id':       game_id,
+        'winner':        winner,
+        'total_moves':   total_moves,
+        'total_time':    time.time() - t_start,
+        'avg_time_blue': float(np.mean(times_blue)) if times_blue else 0.0,
+        'avg_time_red':  float(np.mean(times_red))  if times_red  else 0.0,
     }
 
 
-def _play_one_game(args):
-    """Joue une seule partie (utilisé par le ThreadPoolExecutor)."""
-    player_a, player_b, name_a, name_b, game_index = args
+def _play_one_game(task) -> dict:
+    player_a, player_b, name_a, name_b, game_index = task
     a_is_blue = (game_index % 2 == 0)
     if a_is_blue:
-        result = play_game(player_a, player_b, game_index + 1)
+        g = play_game(player_a, player_b, game_index + 1)
         blue_name, red_name = name_a, name_b
     else:
-        result = play_game(player_b, player_a, game_index + 1)
+        g = play_game(player_b, player_a, game_index + 1)
         blue_name, red_name = name_b, name_a
-
-    result['a_is_blue'] = a_is_blue
-    result['blue_name'] = blue_name
-    result['red_name'] = red_name
-    result['winner_name'] = blue_name if result['winner'] == 'blue' else red_name
-    return result
+    g['a_is_blue']   = a_is_blue
+    g['blue_name']   = blue_name
+    g['red_name']    = red_name
+    g['winner_name'] = blue_name if g['winner'] == 'blue' else red_name
+    return g
 
 
 def match(player_a, player_b, name_a: str, name_b: str,
           num_games: int, game_threads: int = 1) -> dict:
-    """
-    Fait jouer player_a vs player_b sur num_games parties.
-    game_threads > 1 : parallélise les parties via threads.
-    """
-    wins_a = 0
-    wins_b = 0
-    games = []
-    times_a_all = []
-    times_b_all = []
-    moves_all = []
-
+    """Round entre player_a et player_b sur num_games parties (couleurs alternées)."""
     if game_threads > 1:
-        # Chaque thread a sa propre copie des joueurs pour éviter les conflits
-        # d'état interne (arbres MCTS, etc.)
-        from copy import deepcopy
-        tasks = []
-        for i in range(num_games):
-            pa = deepcopy(player_a)
-            pb = deepcopy(player_b)
-            tasks.append((pa, pb, name_a, name_b, i))
-
+        # Chaque tâche reçoit sa propre copie : MCTSAgent / arbres MCTS / caches
+        # ne sont pas thread-safe. AlphaZeroPlayer.__deepcopy__ partage le réseau.
+        tasks = [(deepcopy(player_a), deepcopy(player_b), name_a, name_b, i)
+                 for i in range(num_games)]
         with ThreadPoolExecutor(max_workers=game_threads) as pool:
-            results_list = list(pool.map(_play_one_game, tasks))
+            games = list(pool.map(_play_one_game, tasks))
     else:
-        results_list = []
-        for i in range(num_games):
-            result = _play_one_game((player_a, player_b, name_a, name_b, i))
-            results_list.append(result)
+        games = [_play_one_game((player_a, player_b, name_a, name_b, i))
+                 for i in range(num_games)]
 
-    for i, result in enumerate(results_list):
-        a_is_blue = (i % 2 == 0)
+    wins_a = wins_b = 0
+    times_a_all: list[float] = []
+    times_b_all: list[float] = []
+    moves_all: list[int] = []
+    for g in games:
+        a_is_blue = g['a_is_blue']
         if a_is_blue:
-            if result['winner'] == 'blue':
-                wins_a += 1
-            else:
-                wins_b += 1
-            times_a_all.append(result['avg_time_blue'])
-            times_b_all.append(result['avg_time_red'])
+            if g['winner'] == 'blue': wins_a += 1
+            else:                     wins_b += 1
+            times_a_all.append(g['avg_time_blue'])
+            times_b_all.append(g['avg_time_red'])
         else:
-            if result['winner'] == 'red':
-                wins_a += 1
-            else:
-                wins_b += 1
-            times_a_all.append(result['avg_time_red'])
-            times_b_all.append(result['avg_time_blue'])
-        moves_all.append(result['total_moves'])
-        games.append(result)
+            if g['winner'] == 'red':  wins_a += 1
+            else:                     wins_b += 1
+            times_a_all.append(g['avg_time_red'])
+            times_b_all.append(g['avg_time_blue'])
+        moves_all.append(g['total_moves'])
 
     return {
-        'name_a': name_a,
-        'name_b': name_b,
-        'wins_a': wins_a,
-        'wins_b': wins_b,
-        'games': games,
-        'avg_time_a': np.mean(times_a_all) if times_a_all else 0,
-        'avg_time_b': np.mean(times_b_all) if times_b_all else 0,
-        'avg_moves': np.mean(moves_all) if moves_all else 0,
+        'name_a':     name_a,
+        'name_b':     name_b,
+        'wins_a':     wins_a,
+        'wins_b':     wins_b,
+        'games':      games,
+        'avg_time_a': float(np.mean(times_a_all)) if times_a_all else 0.0,
+        'avg_time_b': float(np.mean(times_b_all)) if times_b_all else 0.0,
+        'avg_moves':  float(np.mean(moves_all))   if moves_all   else 0.0,
     }
 
 
-# ─── Calcul Elo ───────────────────────────────────────────────────────────────
+# ─── Calcul Elo ──────────────────────────────────────────────────────────────
 
-def compute_elo(names: list[str], results: dict, k: float = 32.0,
-                initial: float = 1000.0) -> dict[str, float]:
-    elo = {name: initial for name in names}
+def compute_elo(names: list[str], results: dict[tuple[str, str], tuple[int, int]],
+                k: float = 32.0, initial: float = 1000.0) -> dict[str, float]:
+    elo = {n: initial for n in names}
     for _ in range(10):
         for (a, b), (wa, wb) in results.items():
             total = wa + wb
             if total == 0:
                 continue
             ea = 1.0 / (1.0 + 10 ** ((elo[b] - elo[a]) / 400))
-            eb = 1.0 - ea
-            score_a = wa / total
-            score_b = wb / total
-            elo[a] += k * (score_a - ea)
-            elo[b] += k * (score_b - eb)
+            elo[a] += k * (wa / total - ea)
+            elo[b] += k * (wb / total - (1.0 - ea))
     return elo
 
 
-# ─── Génération HTML ─────────────────────────────────────────────────────────
+# ─── Génération HTML (JSON embedded) ─────────────────────────────────────────
 
-def generate_html_report(all_stats: dict, output_path: str):
-    """Génère un rapport HTML avec graphiques interactifs."""
-    names = all_stats['names']
-    elo = all_stats['elo']
-    wins_total = all_stats['wins_total']
-    games_total = all_stats['games_total']
-    times_total = all_stats['times_total']
-    moves_total = all_stats['moves_total']
-    results = all_stats['results']
-    player_types = all_stats['player_types']
-    total_time = all_stats['total_time']
-    n = len(names)
-    total_matchups = n * (n - 1) // 2
-
-    # Préparer les données pour les graphiques
-    ranking = sorted(names, key=lambda x: elo[x], reverse=True)
-    elo_data = [elo[name] for name in ranking]
-    win_data = [100.0 * wins_total[name] / games_total[name] if games_total[name] > 0 else 0 for name in ranking]
-    time_data = [times_total[name] / games_total[name] if games_total[name] > 0 else 0 for name in ranking]
-    moves_data = [moves_total[name] / games_total[name] if games_total[name] > 0 else 0 for name in ranking]
-    type_colors = {
-        'Random': '#95a5a6',
-        'Alpha-Beta': '#3498db',
-        'Monte Carlo': '#e67e22',
-        'MCTS': '#2ecc71',
-        'Heuristique': '#9b59b6',
-        'MoHex': '#1abc9c',
-        'AlphaZero': '#e74c3c',
-    }
-    bar_colors = [type_colors.get(player_types.get(name, 'Inconnu'), '#34495e') for name in ranking]
-
-    # Matrice des résultats pour heatmap
-    matrix = []
-    for a in ranking:
-        row = []
-        for b in ranking:
-            if a == b:
-                row.append(None)
-            else:
-                key = (a, b) if (a, b) in results else (b, a)
-                if key in results:
-                    wa, wb = results[key]
-                    if key == (a, b):
-                        row.append(wa / (wa + wb) if (wa + wb) > 0 else 0.5)
-                    else:
-                        row.append(wb / (wa + wb) if (wa + wb) > 0 else 0.5)
-                else:
-                    row.append(0.5)
-        matrix.append(row)
-
-    html = f"""<!DOCTYPE html>
+_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Classement Hex 11×11 — Tournoi Round-Robin</title>
+    <title>Classement Hex 11×11 — Tournoi unifié</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }}
-        h1 {{ text-align: center; color: #00d4ff; margin-bottom: 0.5rem; font-size: 2rem; }}
-        .subtitle {{ text-align: center; color: #888; margin-bottom: 2rem; }}
-        .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }}
-        .card {{ background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }}
-        .card h2 {{ color: #00d4ff; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
-        th, td {{ padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; }}
-        th {{ color: #00d4ff; font-weight: 600; }}
-        tr:hover {{ background: #243447; }}
-        .rank-1 {{ color: #ffd700; font-weight: bold; }}
-        .rank-2 {{ color: #c0c0c0; font-weight: bold; }}
-        .rank-3 {{ color: #cd7f32; font-weight: bold; }}
-        .badge {{ display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }}
-        .heatmap {{ display: grid; gap: 2px; margin-top: 1rem; }}
-        .heatmap-cell {{ padding: 0.4rem; text-align: center; font-size: 0.75rem; border-radius: 3px; }}
-        .heatmap-header {{ font-weight: 600; color: #00d4ff; font-size: 0.7rem; }}
-        .stats-row {{ display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }}
-        .stat-box {{ background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }}
-        .stat-box .value {{ font-size: 1.8rem; font-weight: bold; color: #00d4ff; }}
-        .stat-box .label {{ font-size: 0.8rem; color: #888; margin-top: 0.3rem; }}
-        canvas {{ max-height: 350px; }}
-        .full-width {{ grid-column: 1 / -1; }}
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }
+        h1 { text-align: center; color: #00d4ff; margin-bottom: 0.5rem; font-size: 2rem; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .card { background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; font-size: 0.85rem; word-break: break-all; }
+        th { color: #00d4ff; font-weight: 600; }
+        tr:hover { background: #243447; }
+        .rank-1 { color: #ffd700; font-weight: bold; }
+        .rank-2 { color: #c0c0c0; font-weight: bold; }
+        .rank-3 { color: #cd7f32; font-weight: bold; }
+        .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+        .heatmap { display: grid; gap: 2px; margin-top: 1rem; overflow-x: auto; }
+        .heatmap-cell { padding: 0.4rem; text-align: center; font-size: 0.7rem; border-radius: 3px; }
+        .heatmap-header { font-weight: 600; color: #00d4ff; font-size: 0.65rem; word-break: break-all; }
+        .stats-row { display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+        .stat-box { background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }
+        .stat-box .value { font-size: 1.8rem; font-weight: bold; color: #00d4ff; }
+        .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+        canvas { max-height: 350px; }
+        .full-width { grid-column: 1 / -1; }
     </style>
 </head>
 <body>
-    <h1>🏆 Classement Hex 11×11</h1>
-    <p class="subtitle">Tournoi round-robin • {n} IA • {total_matchups} matchups • {all_stats['games_per_matchup']} parties/matchup • Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}</p>
+    <h1>Classement Hex 11×11 — Tournoi unifié</h1>
+    <p id="subtitle" class="subtitle"></p>
 
-    <div class="stats-row">
-        <div class="stat-box"><div class="value">{n}</div><div class="label">Intelligence Artificielles</div></div>
-        <div class="stat-box"><div class="value">{total_matchups}</div><div class="label">Matchups</div></div>
-        <div class="stat-box"><div class="value">{sum(games_total.values()) // 2}</div><div class="label">Parties totales</div></div>
-        <div class="stat-box"><div class="value">{total_time:.0f}s</div><div class="label">Temps total</div></div>
-    </div>
+    <div class="stats-row" id="stats-row"></div>
 
     <div class="grid">
-        <div class="card">
-            <h2>📊 Classement Elo</h2>
-            <canvas id="eloChart"></canvas>
-        </div>
-        <div class="card">
-            <h2>🏅 Taux de Victoire (%)</h2>
-            <canvas id="winChart"></canvas>
-        </div>
-        <div class="card">
-            <h2>⏱️ Temps moyen par coup (s)</h2>
-            <canvas id="timeChart"></canvas>
-        </div>
-        <div class="card">
-            <h2>🎯 Durée moyenne des parties (coups)</h2>
-            <canvas id="movesChart"></canvas>
-        </div>
-        <div class="card full-width">
-            <h2>🔥 Matrice des confrontations (taux de victoire)</h2>
-            <div id="heatmap" class="heatmap"></div>
-        </div>
-        <div class="card full-width">
-            <h2>📋 Classement détaillé</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Rang</th><th>IA</th><th>Type</th><th>Elo</th>
-                        <th>Victoires</th><th>Parties</th><th>Win%</th>
-                        <th>Temps moy./coup</th><th>Coups moy./partie</th>
-                    </tr>
-                </thead>
-                <tbody>
-"""
-
-    for rank, name in enumerate(ranking, 1):
-        rank_class = f"rank-{rank}" if rank <= 3 else ""
-        w = wins_total[name]
-        g = games_total[name]
-        pct = 100.0 * w / g if g > 0 else 0
-        avg_time = times_total[name] / g if g > 0 else 0
-        avg_moves = moves_total[name] / g if g > 0 else 0
-        ptype = player_types.get(name, 'Inconnu')
-        color = type_colors.get(ptype, '#34495e')
-        html += f"""                    <tr>
-                        <td class="{rank_class}">#{rank}</td>
-                        <td>{name}</td>
-                        <td><span class="badge" style="background:{color}20;color:{color};border:1px solid {color}40">{ptype}</span></td>
-                        <td>{elo[name]:.0f}</td>
-                        <td>{w}</td><td>{g}</td><td>{pct:.1f}%</td>
-                        <td>{avg_time:.3f}s</td><td>{avg_moves:.1f}</td>
-                    </tr>
-"""
-
-    html += """                </tbody>
-            </table>
-        </div>
+        <div class="card"><h2>Score Elo</h2><canvas id="eloChart"></canvas></div>
+        <div class="card"><h2>Taux de Victoire (%)</h2><canvas id="winChart"></canvas></div>
+        <div class="card"><h2>Temps moyen par coup (s)</h2><canvas id="timeChart"></canvas></div>
+        <div class="card"><h2>Durée moyenne des parties (coups)</h2><canvas id="movesChart"></canvas></div>
+        <div class="card full-width"><h2>Matrice des confrontations (taux de victoire ligne vs colonne)</h2><div id="heatmap" class="heatmap"></div></div>
+        <div class="card full-width"><h2>Classement détaillé</h2><div id="table-wrap"></div></div>
     </div>
 
+    <script id="ranking-data" type="application/json">__RANKING_JSON__</script>
     <script>
-        const names = """ + json.dumps(ranking) + """;
-        const eloData = """ + json.dumps(elo_data) + """;
-        const winData = """ + json.dumps(win_data) + """;
-        const timeData = """ + json.dumps(time_data) + """;
-        const movesData = """ + json.dumps(moves_data) + """;
-        const barColors = """ + json.dumps(bar_colors) + """;
+        const data = JSON.parse(document.getElementById('ranking-data').textContent);
+
+        const TYPE_COLORS = {
+            'Random':      '#95a5a6',
+            'Alpha-Beta':  '#3498db',
+            'Monte Carlo': '#e67e22',
+            'MCTS':        '#2ecc71',
+            'Heuristique': '#9b59b6',
+            'MoHex':       '#1abc9c',
+            'AlphaZero':   '#e74c3c',
+        };
+
+        function colorFor(name) {
+            const t = data.playerTypes[name] || 'Inconnu';
+            return TYPE_COLORS[t] || '#34495e';
+        }
+
+        // ── Sous-titre & stats ───────────────────────────────────────────────
+        const n = data.names.length;
+        const totalMatchups = n * (n - 1) / 2;
+        const totalGames = data.results.reduce((s, r) => s + r.winsA + r.winsB, 0);
+        document.getElementById('subtitle').textContent =
+            `Tournoi round-robin • ${n} joueurs • ${totalMatchups} matchups • ${data.games_per_matchup} parties/matchup • ${data.sims} sims/coup • Généré le ${data.generated_at_human}`;
+
+        const statsRow = document.getElementById('stats-row');
+        [['Joueurs', n],
+         ['Matchups', totalMatchups],
+         ['Parties totales', totalGames],
+         ['Temps total', `${Math.round(data.total_time)}s`],
+         ['Sims/coup', data.sims]
+        ].forEach(([label, value]) => {
+            statsRow.insertAdjacentHTML('beforeend',
+                `<div class="stat-box"><div class="value">${value}</div><div class="label">${label}</div></div>`);
+        });
+
+        // ── Charts ───────────────────────────────────────────────────────────
+        const names = data.names;  // déjà trié par Elo desc
+        const eloData = names.map(n => data.elo[n]);
+        const winData = names.map(n => data.winPct[n]);
+        const timeData = names.map(n => data.avgTime[n]);
+        const movesData = names.map(n => data.avgMoves[n]);
+        const barColors = names.map(n => colorFor(n));
 
         const chartOpts = {
             indexAxis: 'y',
             responsive: true,
             plugins: { legend: { display: false } },
-            scales: { x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } }, y: { grid: { display: false }, ticks: { color: '#e0e0e0' } } }
+            scales: {
+                x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+                y: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 11 } } }
+            }
         };
 
         new Chart(document.getElementById('eloChart'), {
-            type: 'bar', data: { labels: names, datasets: [{ data: eloData, backgroundColor: barColors, borderRadius: 6 }] }, options: chartOpts
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: eloData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: chartOpts
         });
         new Chart(document.getElementById('winChart'), {
-            type: 'bar', data: { labels: names, datasets: [{ data: winData, backgroundColor: barColors, borderRadius: 6 }] }, options: { ...chartOpts, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, max: 100 } } }
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: winData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: { ...chartOpts, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, max: 100 } } }
         });
         new Chart(document.getElementById('timeChart'), {
-            type: 'bar', data: { labels: names, datasets: [{ data: timeData, backgroundColor: barColors, borderRadius: 6 }] }, options: chartOpts
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: timeData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: chartOpts
         });
         new Chart(document.getElementById('movesChart'), {
-            type: 'bar', data: { labels: names, datasets: [{ data: movesData, backgroundColor: barColors, borderRadius: 6 }] }, options: chartOpts
+            type: 'bar',
+            data: { labels: names, datasets: [{ data: movesData, backgroundColor: barColors, borderRadius: 6 }] },
+            options: chartOpts
         });
 
-        // Heatmap
-        const matrix = """ + json.dumps(matrix) + """;
+        // ── Heatmap ──────────────────────────────────────────────────────────
+        const resultMap = {};
+        data.results.forEach(r => { resultMap[r.a + '|' + r.b] = r; });
+
         const heatmapEl = document.getElementById('heatmap');
-        const size = names.length;
-        heatmapEl.style.gridTemplateColumns = `80px repeat(${size}, 1fr)`;
-
-        // Header row
+        heatmapEl.style.gridTemplateColumns = `100px repeat(${n}, 1fr)`;
         heatmapEl.innerHTML = '<div class="heatmap-header"></div>';
-        names.forEach(n => {
-            heatmapEl.innerHTML += `<div class="heatmap-header" style="writing-mode:vertical-lr;text-orientation:mixed;transform:rotate(180deg)">${n}</div>`;
+        names.forEach(nm => {
+            heatmapEl.innerHTML += `<div class="heatmap-header" style="writing-mode:vertical-lr;text-orientation:mixed;transform:rotate(180deg)">${nm}</div>`;
         });
-
-        matrix.forEach((row, i) => {
-            heatmapEl.innerHTML += `<div class="heatmap-header">${names[i]}</div>`;
-            row.forEach((val, j) => {
-                if (val === null) {
+        names.forEach((a, i) => {
+            heatmapEl.innerHTML += `<div class="heatmap-header">${a}</div>`;
+            names.forEach((b, j) => {
+                if (i === j) {
                     heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:#1a2634">-</div>`;
-                } else {
-                    const pct = (val * 100).toFixed(0);
-                    const r = Math.round(255 * (1 - val));
-                    const g = Math.round(255 * val);
-                    heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
+                    return;
                 }
+                let val = 0.5;
+                const fwd = resultMap[a + '|' + b];
+                const rev = resultMap[b + '|' + a];
+                if (fwd && (fwd.winsA + fwd.winsB) > 0) val = fwd.winsA / (fwd.winsA + fwd.winsB);
+                else if (rev && (rev.winsA + rev.winsB) > 0) val = rev.winsB / (rev.winsA + rev.winsB);
+                const pct = (val * 100).toFixed(0);
+                const r = Math.round(255 * (1 - val));
+                const g = Math.round(255 * val);
+                heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
             });
         });
+
+        // ── Tableau ──────────────────────────────────────────────────────────
+        let tableHTML = `<table><thead><tr>
+            <th>Rang</th><th>Joueur</th><th>Famille</th><th>Type</th><th>Elo</th>
+            <th>Victoires</th><th>Parties</th><th>Win%</th>
+            <th>Temps moy./coup</th><th>Coups moy./partie</th></tr></thead><tbody>`;
+        names.forEach((nm, idx) => {
+            const rank = idx + 1;
+            const rankClass = rank <= 3 ? `rank-${rank}` : '';
+            const t = data.playerTypes[nm];
+            const f = data.playerFamilies[nm];
+            const c = colorFor(nm);
+            tableHTML += `<tr>
+                <td class="${rankClass}">#${rank}</td>
+                <td>${nm}</td>
+                <td>${f}</td>
+                <td><span class="badge" style="background:${c}20;color:${c};border:1px solid ${c}40">${t}</span></td>
+                <td>${data.elo[nm].toFixed(0)}</td>
+                <td>${data.winsTotal[nm]}</td>
+                <td>${data.gamesTotal[nm]}</td>
+                <td>${data.winPct[nm].toFixed(1)}%</td>
+                <td>${data.avgTime[nm].toFixed(3)}s</td>
+                <td>${data.avgMoves[nm].toFixed(1)}</td>
+            </tr>`;
+        });
+        tableHTML += '</tbody></table>';
+        document.getElementById('table-wrap').innerHTML = tableHTML;
     </script>
 </body>
 </html>"""
 
+
+def generate_html_report(payload: dict, output_path: str) -> None:
+    json_blob = json.dumps(payload, ensure_ascii=False, indent=2)
+    # Empêche l'injection HTML : protège la séquence "</script>" si elle apparaît
+    json_blob = json_blob.replace('</', '<\\/')
+    html = _HTML_TEMPLATE.replace('__RANKING_JSON__', json_blob)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"Rapport HTML : {output_path}")
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
-
-DEFAULT_IAS = ['random', 'alphabeta', 'heuristic', 'mohex', 'alphazero']
-
+# ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Tournoi round-robin entre TOUTES les IA Hex 11×11")
+        description="Tournoi round-robin unifié Hex 11×11 (classiques + AlphaZero variantes)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
     parser.add_argument('--ias', nargs='+', default=None,
-                        help=f"Liste des IA à inclure (défaut: {DEFAULT_IAS})")
-    parser.add_argument('--games', type=int, default=100,
-                        help="Parties par matchup (défaut: 100)")
-    parser.add_argument('--sims', type=int, default=100,
-                        help="Simulations MCTS pour AlphaZero (défaut: 100)")
+                        help=f"Limite aux IA classiques listées (défaut: {DEFAULT_CLASSICS})")
+    parser.add_argument('--no-classics', action='store_true',
+                        help="Aucune IA classique (tournoi 100% AlphaZero)")
+    parser.add_argument('--no-best', action='store_true',
+                        help=f"N'inclut pas {BEST_MODEL_FILE}")
+    parser.add_argument('--no-models', action='store_true',
+                        help="Ignore le contenu de --model-dir")
+    parser.add_argument('--model-dir', type=str,
+                        default=os.path.join(_dir, 'model'),
+                        help="Dossier des .pt AlphaZero (défaut: alphazero/model)")
+    parser.add_argument('--add', nargs='*', default=[], metavar='PATH',
+                        help="Chemins .pt supplémentaires (alias 'best' accepté)")
+    parser.add_argument('--games', type=int, default=20,
+                        help="Parties par matchup (défaut: 20)")
+    parser.add_argument('--sims', type=int, default=200,
+                        help="Simulations MCTS pour les joueurs AlphaZero (défaut: 200)")
     parser.add_argument('--time', type=float, default=0.5,
-                        help="Temps par coup en secondes (défaut: 0.5)")
+                        help="Budget temps par coup pour les classiques (défaut: 0.5s)")
     parser.add_argument('--output-dir', type=str,
                         default=os.path.join(_dir, 'rank'),
                         help="Dossier de sortie (défaut: alphazero/rank)")
     parser.add_argument('--output', type=str, default=None,
-                        help="Fichier HTML explicite (défaut: rank/ranking_<date>.html)")
+                        help="Fichier HTML explicite (sinon ranking_<date>.html)")
     parser.add_argument('--no-html', action='store_true',
-                        help="Sortie texte uniquement (pas de HTML)")
+                        help="Pas de sortie HTML")
     parser.add_argument('--no-csv', action='store_true',
-                        help="Ne pas écrire le CSV des parties")
+                        help="Pas de sortie CSV")
     parser.add_argument('--device', type=str, default=None,
                         help="Device (cuda/cpu, défaut: auto)")
     parser.add_argument('--workers', type=int, default=1,
@@ -530,164 +604,194 @@ def main():
     global TIME_PER_MOVE
     TIME_PER_MOVE = args.time
 
-    # Device
-    if args.device:
-        device = torch.device(args.device)
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Liste des IA
-    ias = args.ias if args.ias else DEFAULT_IAS.copy()
+    device = (torch.device(args.device) if args.device
+              else torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
-    names = [get_player_name(ia) for ia in ias]
-    n = len(names)
-    total_matchups = n * (n - 1) // 2
-
-    print(f"Tournoi : {n} IA, {total_matchups} matchups, {args.games} parties/matchup, device={device}")
-
-    # Charger tous les joueurs
-    players = {}
-    player_types = {}
-    for ia, name in zip(ias, names):
-        p = get_player(ia, device=device, sims=args.sims)
-        if p is not None:
-            players[name] = p
-            player_types[name] = get_player_type(ia)
-
-    valid_names = list(players.keys())
-    if len(valid_names) < 2:
-        print("Erreur : pas assez de joueurs valides.")
+    # 1. Construction du registre
+    print("Construction du registre des joueurs...")
+    entries = build_player_registry(args)
+    if not entries:
+        print("ERREUR : aucun joueur sélectionné (vérifiez vos flags).", file=sys.stderr)
         sys.exit(1)
 
-    # Paths de sortie
+    # 2. Avertissements
+    az_count = sum(1 for e in entries if e.family == 'alphazero')
+    if az_count > 10:
+        print(f"AVERT : {az_count} modèles AlphaZero — charge VRAM élevée.\n"
+              f"        Si OOM, retentez avec --no-models ou --device cpu.",
+              file=sys.stderr)
+
+    print(f"Chargement de {len(entries)} joueurs sur {device}...")
+    valid = instantiate_players(entries, device, args.sims)
+    if len(valid) < 2:
+        print("ERREUR : moins de 2 joueurs valides après chargement.", file=sys.stderr)
+        sys.exit(1)
+
+    n = len(valid)
+    matchups = list(combinations(range(n), 2))
+    total_matchups = len(matchups)
+    total_games_planned = total_matchups * args.games
+    print(f"\nTournoi : {n} joueurs, {total_matchups} matchups, "
+          f"{args.games} parties/matchup, {total_games_planned} parties totales, "
+          f"sims={args.sims}, time={args.time}s, device={device}")
+    print("─" * 70)
+
+    # 3. Préparer les sorties
     os.makedirs(args.output_dir, exist_ok=True)
     run_dt = datetime.now()
     run_stamp = run_dt.strftime('%Y-%m-%d_%H%M')
     if args.output:
         html_path = args.output
-        base, _ = os.path.splitext(html_path)
+        base = os.path.splitext(html_path)[0]
     else:
         base = os.path.join(args.output_dir, f'ranking_{run_stamp}')
         html_path = base + '.html'
     csv_path = base + '.csv'
 
-    # CSV : une ligne par partie jouée
     csv_file = None
     csv_writer = None
     if not args.no_csv:
         csv_file = open(csv_path, 'w', newline='', encoding='utf-8')
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow([
-            'run_timestamp', 'name_a', 'name_b', 'game_index',
-            'a_is_blue', 'blue_name', 'red_name', 'winner',
-            'winner_name', 'total_moves', 'total_time',
-            'avg_time_blue', 'avg_time_red',
+            'run_timestamp', 'name_a', 'name_b', 'family_a', 'family_b',
+            'type_a', 'type_b', 'game_index', 'a_is_blue',
+            'blue_name', 'red_name', 'winner', 'winner_name',
+            'total_moves', 'total_time', 'avg_time_blue', 'avg_time_red',
+            'sims', 'time_per_move',
         ])
 
-    # Tournoi round-robin
-    results = {}
-    wins_total = {name: 0 for name in valid_names}
-    games_total = {name: 0 for name in valid_names}
-    times_total = {name: 0.0 for name in valid_names}
-    moves_total = {name: 0 for name in valid_names}
+    # 4. Round-robin
+    by_key = {e.key: e for e in valid}
+    results: dict[tuple[str, str], tuple[int, int]] = {}
+    wins_total = {e.key: 0 for e in valid}
+    games_total = {e.key: 0 for e in valid}
+    times_total = {e.key: 0.0 for e in valid}
+    moves_total = {e.key: 0.0 for e in valid}
     matchup_count = 0
     t_start = time.time()
 
-    matchups = list(combinations(valid_names, 2))
-    gt = args.game_threads
+    def _run_matchup(name_a: str, name_b: str) -> dict:
+        # Si --workers > 1, les matchups parallèles partagent les joueurs ;
+        # on deepcopy pour éviter les races sur l'arbre MCTS.
+        if args.workers > 1:
+            pa = deepcopy(by_key[name_a].player)
+            pb = deepcopy(by_key[name_b].player)
+        else:
+            pa = by_key[name_a].player
+            pb = by_key[name_b].player
+        return match(pa, pb, name_a, name_b, args.games,
+                     game_threads=args.game_threads)
 
-    def _run_one_matchup(name_a, name_b):
-        return match(players[name_a], players[name_b],
-                     name_a, name_b, args.games, game_threads=gt)
-
-    def _collect(name_a, name_b, match_result):
+    def _collect(name_a: str, name_b: str, mr: dict) -> None:
+        nonlocal matchup_count
+        matchup_count += 1
+        ea = by_key[name_a]
+        eb = by_key[name_b]
         if csv_writer is not None:
-            for g in match_result['games']:
+            for g in mr['games']:
                 csv_writer.writerow([
-                    run_stamp, name_a, name_b, g['game_id'],
-                    int(g['a_is_blue']), g['blue_name'], g['red_name'],
-                    g['winner'], g['winner_name'], g['total_moves'],
-                    f"{g['total_time']:.4f}",
-                    f"{g['avg_time_blue']:.6f}",
-                    f"{g['avg_time_red']:.6f}",
+                    run_stamp, name_a, name_b, ea.family, eb.family,
+                    ea.type, eb.type, g['game_id'], int(g['a_is_blue']),
+                    g['blue_name'], g['red_name'], g['winner'], g['winner_name'],
+                    g['total_moves'], f"{g['total_time']:.4f}",
+                    f"{g['avg_time_blue']:.6f}", f"{g['avg_time_red']:.6f}",
+                    args.sims, args.time,
                 ])
             csv_file.flush()
-        for g in match_result['games']:
-            g['moves'] = None
 
-        results[(name_a, name_b)] = (match_result['wins_a'], match_result['wins_b'])
-        wins_total[name_a] += match_result['wins_a']
-        wins_total[name_b] += match_result['wins_b']
+        results[(name_a, name_b)] = (mr['wins_a'], mr['wins_b'])
+        wins_total[name_a]  += mr['wins_a']
+        wins_total[name_b]  += mr['wins_b']
         games_total[name_a] += args.games
         games_total[name_b] += args.games
-        times_total[name_a] += match_result['avg_time_a'] * args.games
-        times_total[name_b] += match_result['avg_time_b'] * args.games
-        moves_total[name_a] += match_result['avg_moves'] * args.games
-        moves_total[name_b] += match_result['avg_moves'] * args.games
+        times_total[name_a] += mr['avg_time_a'] * args.games
+        times_total[name_b] += mr['avg_time_b'] * args.games
+        moves_total[name_a] += mr['avg_moves']  * args.games
+        moves_total[name_b] += mr['avg_moves']  * args.games
+
+        sys.stdout.write(
+            f"\r  [{matchup_count}/{total_matchups}] "
+            f"{name_a} {mr['wins_a']}-{mr['wins_b']} {name_b}"
+            + " " * 20 + "\n"
+        )
+        sys.stdout.flush()
+
+    pair_keys = [(valid[i].key, valid[j].key) for i, j in matchups]
 
     if args.workers > 1:
-        # ─── Matchups en parallèle (threads — partage GPU + modèles) ────
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            future_to_matchup = {
-                executor.submit(_run_one_matchup, na, nb): (na, nb)
-                for na, nb in matchups
-            }
-            for future in as_completed(future_to_matchup):
-                name_a, name_b = future_to_matchup[future]
-                matchup_count += 1
-                match_result = future.result()
-                sys.stdout.write(
-                    f"\r  [{matchup_count}/{total_matchups}] {name_a} vs {name_b} done"
-                )
-                sys.stdout.flush()
-                _collect(name_a, name_b, match_result)
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            future_map = {pool.submit(_run_matchup, na, nb): (na, nb)
+                          for na, nb in pair_keys}
+            for future in as_completed(future_map):
+                na, nb = future_map[future]
+                _collect(na, nb, future.result())
     else:
-        # ─── Mode séquentiel ────────────────────────────────────────────
-        for name_a, name_b in matchups:
-            matchup_count += 1
-            sys.stdout.write(
-                f"\r  [{matchup_count}/{total_matchups}] {name_a} vs {name_b} ..."
-            )
+        for na, nb in pair_keys:
+            sys.stdout.write(f"\r  [{matchup_count + 1}/{total_matchups}] {na} vs {nb} ...")
             sys.stdout.flush()
-            match_result = _run_one_matchup(name_a, name_b)
-            _collect(name_a, name_b, match_result)
+            _collect(na, nb, _run_matchup(na, nb))
 
     total_time = time.time() - t_start
-    print()  # fin de la ligne de progression
 
     if csv_file is not None:
         csv_file.close()
-        print(f"CSV des parties : {csv_path}")
+        print(f"CSV : {csv_path}")
 
-    # Calcul Elo
-    elo = compute_elo(valid_names, results)
-    ranking = sorted(valid_names, key=lambda x: elo[x], reverse=True)
+    # 5. Elo + classement console
+    valid_keys = [e.key for e in valid]
+    elo = compute_elo(valid_keys, results)
+    ranking = sorted(valid_keys, key=lambda k: elo[k], reverse=True)
 
-    # Affichage console compact
-    print(f"\n{'Rang':<5} {'IA':<16} {'Elo':>5} {'W':>4}/{'':<4} {'Win%':>5}")
-    print("-" * 42)
-    for rank, name in enumerate(ranking, 1):
-        w = wins_total[name]
-        g = games_total[name]
-        pct = 100.0 * w / g if g > 0 else 0
-        print(f"#{rank:<4} {name:<16} {elo[name]:>5.0f} {w:>4}/{g:<4} {pct:>4.0f}%")
+    print(f"\n{'Rang':<5} {'Joueur':<28} {'Famille':<10} {'Elo':>5} "
+          f"{'W':>5}/{'':<5} {'Win%':>5}")
+    print("─" * 70)
+    for rank, key in enumerate(ranking, 1):
+        e = by_key[key]
+        w = wins_total[key]
+        g = games_total[key]
+        pct = 100.0 * w / g if g > 0 else 0.0
+        marker = " ← MEILLEUR" if rank == 1 else ""
+        print(f"#{rank:<4} {key:<28} {e.family:<10} {elo[key]:>5.0f} "
+              f"{w:>5}/{g:<5} {pct:>4.0f}%{marker}")
     print(f"\nTemps total : {total_time:.0f}s")
 
-    # Génération HTML
+    # 6. HTML
     if not args.no_html:
-        all_stats = {
-            'names': valid_names,
-            'elo': elo,
-            'wins_total': wins_total,
-            'games_total': games_total,
-            'times_total': times_total,
-            'moves_total': moves_total,
-            'results': results,
-            'player_types': player_types,
-            'total_time': total_time,
+        win_pct = {k: (100.0 * wins_total[k] / games_total[k]
+                       if games_total[k] > 0 else 0.0) for k in valid_keys}
+        avg_time = {k: (times_total[k] / games_total[k]
+                        if games_total[k] > 0 else 0.0) for k in valid_keys}
+        avg_moves = {k: (moves_total[k] / games_total[k]
+                         if games_total[k] > 0 else 0.0) for k in valid_keys}
+
+        payload = {
+            'schema_version':    1,
+            'generated_at':      run_dt.isoformat(timespec='seconds'),
+            'generated_at_human': run_dt.strftime('%d/%m/%Y à %H:%M'),
             'games_per_matchup': args.games,
+            'sims':              args.sims,
+            'time_per_move':     args.time,
+            'total_time':        total_time,
+            'names':             ranking,   # tri Elo desc
+            'playerTypes':       {k: by_key[k].type   for k in valid_keys},
+            'playerFamilies':    {k: by_key[k].family for k in valid_keys},
+            'playerPaths':       {k: (os.path.relpath(by_key[k].source_path, _dir)
+                                      if by_key[k].source_path else None)
+                                  for k in valid_keys},
+            'elo':               {k: float(elo[k])   for k in valid_keys},
+            'winPct':            win_pct,
+            'avgTime':           avg_time,
+            'avgMoves':          avg_moves,
+            'winsTotal':         {k: int(wins_total[k])  for k in valid_keys},
+            'gamesTotal':        {k: int(games_total[k]) for k in valid_keys},
+            'results': [
+                {'a': a, 'b': b, 'winsA': wa, 'winsB': wb}
+                for (a, b), (wa, wb) in results.items()
+            ],
         }
-        generate_html_report(all_stats, html_path)
+        generate_html_report(payload, html_path)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

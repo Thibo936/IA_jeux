@@ -91,6 +91,20 @@ class AlphaZeroPlayer:
         }
         return move
 
+    def __deepcopy__(self, memo):
+        # Clone uniquement l'agent MCTS (arbre + cache, non thread-safe).
+        # Le réseau PyTorch est partagé : nn.Module.forward() en eval()
+        # est thread-safe en lecture seule, et le dupliquer en VRAM par
+        # thread saturerait rapidement la mémoire.
+        from mcts_az import MCTSAgent
+        new = AlphaZeroPlayer.__new__(AlphaZeroPlayer)
+        new.device = self.device
+        new._sims = self._sims
+        new.last_stats = {}
+        new._agent = MCTSAgent(self._agent.net, device=self.device,
+                               sims=self._sims, add_dirichlet=False)
+        return new
+
 
 # ─── Appel d'une IA externe via subprocess ────────────────────────────────────
 
