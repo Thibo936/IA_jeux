@@ -7,8 +7,9 @@ import sys
 import time
 
 _dir = os.path.dirname(os.path.abspath(__file__))
-_ia = os.path.join(os.path.dirname(_dir), 'ia')
-for _p in [_dir, _ia]:
+_root = os.path.dirname(_dir)
+_ia = os.path.join(_root, 'ia')
+for _p in [_dir, _root, _ia]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -28,7 +29,7 @@ from evaluate import evaluate_models
 from config import (
     BATCH_SIZE, LEARNING_RATE, LR_ETA_MIN, WEIGHT_DECAY, TRAIN_STEPS,
     GAMES_PER_ITER, MCTS_SIMULATIONS, CHECKPOINT_DIR, BEST_MODEL_FILE,
-    REPLAY_BUFFER_SIZE, WIN_RATE_THRESHOLD, EVAL_GAMES,
+    REPLAY_BUFFER_SIZE, WIN_RATE_THRESHOLD, EVAL_GAMES, MODEL_DIR,
 )
 
 

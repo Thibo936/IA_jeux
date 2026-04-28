@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Classement Hex 11×11 — Tournoi unifié</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }
+  h1 { text-align: center; color: #00d4ff; margin-bottom: 0.5rem; font-size: 2rem; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .card { background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }
+  .card.az h2 { color: #e74c3c; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; font-size: 0.85rem; word-break: break-all; }
+  th { color: #00d4ff; font-weight: 600; }
+  tr:hover { background: #243447; }
+  .rank-1 { color: #ffd700; font-weight: bold; }
+  .rank-2 { color: #c0c0c0; font-weight: bold; }
+  .rank-3 { color: #cd7f32; font-weight: bold; }
+  .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .heatmap { display: grid; gap: 2px; margin-top: 1rem; overflow-x: auto; }
+  .heatmap-cell { padding: 0.4rem; text-align: center; font-size: 0.7rem; border-radius: 3px; }
+  .heatmap-header { font-weight: 600; color: #00d4ff; font-size: 0.65rem; word-break: break-all; }
+  .stats-row { display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+  .stat-box { background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }
+  .stat-box .value { font-size: 1.8rem; font-weight: bold; color: #00d4ff; }
+  .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+  canvas { max-height: 350px; }
+  .full-width { grid-column: 1 / -1; }
+  .section-title { color: #00d4ff; font-size: 1.4rem; margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #2a3a4a; }
+  .az-title { color: #e74c3c; }
+  .delta-pos { color: #2ecc71; font-weight: 600; }
+  .delta-neg { color: #e74c3c; font-weight: 600; }
+  .delta-zero { color: #888; }
+</style>
+</head>
+<body>
+<h1>Classement Hex 11×11 — Tournoi unifié</h1>
+<p id="subtitle" class="subtitle"></p>
+
+<div class="stats-row" id="stats-row"></div>
+
+<div class="grid">
+  <div class="card"><h2>Score Elo</h2><canvas id="eloChart"></canvas></div>
+  <div class="card"><h2>Taux de Victoire (%)</h2><canvas id="winChart"></canvas></div>
+  <div class="card"><h2>Temps moyen par coup (s)</h2><canvas id="timeChart"></canvas></div>
+  <div class="card"><h2>Durée moyenne des parties (coups)</h2><canvas id="movesChart"></canvas></div>
+  <div class="card full-width"><h2>Matrice des confrontations (taux de victoire ligne vs colonne)</h2><div id="heatmap" class="heatmap"></div></div>
+  <div class="card full-width"><h2>Évolution temporelle — Elo</h2><canvas id="evoElo"></canvas></div>
+  <div class="card full-width"><h2>Évolution temporelle — Win%</h2><canvas id="evoWin"></canvas></div>
+  <div class="card full-width"><h2>Classement détaillé</h2><div id="table-wrap"></div></div>
+</div>
+
+<script id="ranking-data" type="application/json">{
+  "schema_version": 2,
+  "generated_at": "2026-04-26T20:37:18",
+  "generated_at_human": "26/04/2026 à 20:37",
+  "games_per_matchup": 50,
+  "sims": 200,
+  "time_per_move": 0.5,
+  "total_time": 22418.830099582672,
+  "names": [
+    "AlphaBeta",
+    "AZ-03",
+    "AZ-07",
+    "AZ-06",
+    "AZ-best",
+    "AZ-01",
+    "AZ-05",
+    "AZ-01_2",
+    "AZ-04",
+    "Heuristic",
+    "MoHex",
+    "MCTS-Light",
+    "MonteCarlo",
+    "Random"
+  ],
+  "playerTypes": {
+    "Random": "Random",
+    "AlphaBeta": "Alpha-Beta",
+    "MonteCarlo": "Monte Carlo",
+    "MCTS-Light": "MCTS",
+    "Heuristic": "Heuristique",
+    "MoHex": "MoHex",
+    "AZ-best": "AlphaZero",
+    "AZ-01": "AlphaZero",
+    "AZ-01_2": "AlphaZero",
+    "AZ-03": "AlphaZero",
+    "AZ-04": "AlphaZero",
+    "AZ-05": "AlphaZero",
+    "AZ-06": "AlphaZero",
+    "AZ-07": "AlphaZero"
+  },
+  "playerFamilies": {
+    "Random": "classic",
+    "AlphaBeta": "classic",
+    "MonteCarlo": "classic",
+    "MCTS-Light": "classic",
+    "Heuristic": "classic",
+    "MoHex": "classic",
+    "AZ-best": "alphazero",
+    "AZ-01": "alphazero",
+    "AZ-01_2": "alphazero",
+    "AZ-03": "alphazero",
+    "AZ-04": "alphazero",
+    "AZ-05": "alphazero",
+    "AZ-06": "alphazero",
+    "AZ-07": "alphazero"
+  },
+  "playerPaths": {
+    "Random": null,
+    "AlphaBeta": null,
+    "MonteCarlo": null,
+    "MCTS-Light": null,
+    "Heuristic": null,
+    "MoHex": null,
+    "AZ-best": "checkpoints/best_model.pt",
+    "AZ-01": "model/model_01_00_17_04.pt",
+    "AZ-01_2": "model/model_01_00_18_04.pt",
+    "AZ-03": "model/model_03_01_18_04.pt",
+    "AZ-04": "model/model_04_02_22_04.pt",
+    "AZ-05": "model/model_05_04_23_04.pt",
+    "AZ-06": "model/model_06_04_24_04.pt",
+    "AZ-07": "model/model_07_03_25_04.pt"
+  },
+  "playerFiles": {
+    "Random": null,
+    "AlphaBeta": null,
+    "MonteCarlo": null,
+    "MCTS-Light": null,
+    "Heuristic": null,
+    "MoHex": null,
+    "AZ-best": "best_model.pt",
+    "AZ-01": "model_01_00_17_04.pt",
+    "AZ-01_2": "model_01_00_18_04.pt",
+    "AZ-03": "model_03_01_18_04.pt",
+    "AZ-04": "model_04_02_22_04.pt",
+    "AZ-05": "model_05_04_23_04.pt",
+    "AZ-06": "model_06_04_24_04.pt",
+    "AZ-07": "model_07_03_25_04.pt"
+  },
+  "elo": {
+    "Random": 422.5923966883384,
+    "AlphaBeta": 1258.3239499803406,
+    "MonteCarlo": 600.5910830041514,
+    "MCTS-Light": 603.8537049460185,
+    "Heuristic": 875.6328038403263,
+    "MoHex": 861.1250558725784,
+    "AZ-best": 1181.028263296261,
+    "AZ-01": 1152.0056415670342,
+    "AZ-01_2": 1144.4187688643253,
+    "AZ-03": 1246.8641922670824,
+    "AZ-04": 1124.811173698674,
+    "AZ-05": 1151.633972844425,
+    "AZ-06": 1188.1848470993214,
+    "AZ-07": 1188.934146031125
+  },
+  "winPct": {
+    "Random": 0.15384615384615385,
+    "AlphaBeta": 76.92307692307692,
+    "MonteCarlo": 11.692307692307692,
+    "MCTS-Light": 11.846153846153847,
+    "Heuristic": 34.61538461538461,
+    "MoHex": 33.07692307692308,
+    "AZ-best": 67.84615384615384,
+    "AZ-01": 63.38461538461539,
+    "AZ-01_2": 64.3076923076923,
+    "AZ-03": 72.46153846153847,
+    "AZ-04": 60.76923076923077,
+    "AZ-05": 64.76923076923077,
+    "AZ-06": 68.92307692307692,
+    "AZ-07": 69.23076923076923
+  },
+  "avgTime": {
+    "Random": 2.2277879650969402e-05,
+    "AlphaBeta": 0.1447572598998127,
+    "MonteCarlo": 0.49928180644370496,
+    "MCTS-Light": 0.5000524584598937,
+    "Heuristic": 0.03083892725049976,
+    "MoHex": 0.4791825873726801,
+    "AZ-best": 0.0692056826263374,
+    "AZ-01": 0.07006250971044405,
+    "AZ-01_2": 0.06946979952200652,
+    "AZ-03": 0.06967184448967866,
+    "AZ-04": 0.06936241835309336,
+    "AZ-05": 0.06923511047545218,
+    "AZ-06": 0.06952437857421923,
+    "AZ-07": 0.06928177259654056
+  },
+  "avgMoves": {
+    "Random": 32.353846153846156,
+    "AlphaBeta": 28.201538461538462,
+    "MonteCarlo": 31.976923076923075,
+    "MCTS-Light": 32.21230769230769,
+    "Heuristic": 30.095384615384614,
+    "MoHex": 38.526153846153846,
+    "AZ-best": 24.97230769230769,
+    "AZ-01": 27.37076923076923,
+    "AZ-01_2": 26.133846153846154,
+    "AZ-03": 29.606153846153845,
+    "AZ-04": 25.935384615384617,
+    "AZ-05": 26.48,
+    "AZ-06": 24.95230769230769,
+    "AZ-07": 24.543076923076924
+  },
+  "winsTotal": {
+    "Random": 1,
+    "AlphaBeta": 500,
+    "MonteCarlo": 76,
+    "MCTS-Light": 77,
+    "Heuristic": 225,
+    "MoHex": 215,
+    "AZ-best": 441,
+    "AZ-01": 412,
+    "AZ-01_2": 418,
+    "AZ-03": 471,
+    "AZ-04": 395,
+    "AZ-05": 421,
+    "AZ-06": 448,
+    "AZ-07": 450
+  },
+  "gamesTotal": {
+    "Random": 650,
+    "AlphaBeta": 650,
+    "MonteCarlo": 650,
+    "MCTS-Light": 650,
+    "Heuristic": 650,
+    "MoHex": 650,
+    "AZ-best": 650,
+    "AZ-01": 650,
+    "AZ-01_2": 650,
+    "AZ-03": 650,
+    "AZ-04": 650,
+    "AZ-05": 650,
+    "AZ-06": 650,
+    "AZ-07": 650
+  },
+  "results": [
+    {
+      "a": "Random",
+      "b": "AlphaBeta",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "MonteCarlo",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "Random",
+      "b": "MCTS-Light",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "Heuristic",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "MoHex",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Random",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "MonteCarlo",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "Heuristic",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "MoHex",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-best",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-01",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-01_2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-03",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-04",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "MCTS-Light",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "Heuristic",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "MoHex",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MonteCarlo",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "Heuristic",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "MoHex",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Heuristic",
+      "b": "MoHex",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-01",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Heuristic",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-best",
+      "winsA": 9,
+      "winsB": 41
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-01",
+      "winsA": 13,
+      "winsB": 37
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-01_2",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-03",
+      "winsA": 4,
+      "winsB": 46
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-04",
+      "winsA": 5,
+      "winsB": 45
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-05",
+      "winsA": 4,
+      "winsB": 46
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-06",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-01",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-01_2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-03",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-04",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-05",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-07",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    }
+  ]
+}</script>
+<script>
+const data = JSON.parse(document.getElementById('ranking-data').textContent);
+
+const TYPE_COLORS = {
+    'Random': '#95a5a6',
+    'Alpha-Beta': '#3498db',
+    'Monte Carlo': '#e67e22',
+    'MCTS': '#2ecc71',
+    'Heuristique': '#9b59b6',
+    'MoHex': '#1abc9c',
+    'AlphaZero': '#e74c3c',
+};
+
+function colorFor(name) {
+    const t = data.playerTypes[name] || 'Inconnu';
+    return TYPE_COLORS[t] || '#34495e';
+}
+
+// ── Sous-titre & stats ────────────────────────────────────────────────────
+const n = data.names.length;
+const totalMatchups = n * (n - 1) / 2;
+const totalGames = data.results.reduce((s, r) => s + r.winsA + r.winsB, 0);
+const runsCount = data.runs ? data.runs.length : 1;
+document.getElementById('subtitle').textContent =
+    `Tournoi round-robin • ${n} joueurs • ${totalMatchups} matchups • ${data.games_per_matchup} parties/matchup • ${data.sims} sims/coup • ${runsCount} runs • Généré le ${data.generated_at_human}`;
+
+const statsRow = document.getElementById('stats-row');
+[['Joueurs', n], ['Matchups', totalMatchups], ['Parties totales', totalGames],
+ ['Runs', runsCount], ['Temps total', `${Math.round(data.total_time)}s`],
+ ['Sims/coup', data.sims]
+].forEach(([label, value]) => {
+    statsRow.insertAdjacentHTML('beforeend',
+        `<div class="stat-box"><div class="value">${value}</div><div class="label">${label}</div></div>`);
+});
+
+// ── Charts (barres) ───────────────────────────────────────────────────────
+const names = data.names;
+const eloData = names.map(n => data.elo[n]);
+const winData = names.map(n => data.winPct[n]);
+const timeData = names.map(n => data.avgTime[n]);
+const movesData = names.map(n => data.avgMoves[n]);
+const barColors = names.map(n => colorFor(n));
+
+const chartOpts = {
+    indexAxis: 'y',
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+        x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+        y: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 11 } } }
+    }
+};
+
+new Chart(document.getElementById('eloChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: eloData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+new Chart(document.getElementById('winChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: winData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: { ...chartOpts, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, max: 100 } } }
+});
+new Chart(document.getElementById('timeChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: timeData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+new Chart(document.getElementById('movesChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: movesData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+
+// ── Heatmap ───────────────────────────────────────────────────────────────
+const resultMap = {};
+data.results.forEach(r => { resultMap[r.a + '|' + r.b] = r; });
+
+const heatmapEl = document.getElementById('heatmap');
+heatmapEl.style.gridTemplateColumns = `100px repeat(${n}, 1fr)`;
+heatmapEl.innerHTML = '<div class="heatmap-header"></div>';
+names.forEach(nm => {
+    heatmapEl.innerHTML += `<div class="heatmap-header" style="writing-mode:vertical-lr;text-orientation:mixed;transform:rotate(180deg)">${nm}</div>`;
+});
+names.forEach((a, i) => {
+    heatmapEl.innerHTML += `<div class="heatmap-header">${a}</div>`;
+    names.forEach((b, j) => {
+        if (i === j) {
+            heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:#1a2634">-</div>`;
+            return;
+        }
+        let val = 0.5;
+        const fwd = resultMap[a + '|' + b];
+        const rev = resultMap[b + '|' + a];
+        if (fwd && (fwd.winsA + fwd.winsB) > 0) val = fwd.winsA / (fwd.winsA + fwd.winsB);
+        else if (rev && (rev.winsA + rev.winsB) > 0) val = rev.winsB / (rev.winsA + rev.winsB);
+        const pct = (val * 100).toFixed(0);
+        const r = Math.round(255 * (1 - val));
+        const g = Math.round(255 * val);
+        heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
+    });
+});
+
+// ── Évolution temporelle (courbes) ────────────────────────────────────────
+if (data.runs && data.runs.length > 1) {
+    const evoLabels = data.runs.map(r => r.date);
+    const evoDates = data.runs.map(r => r.fullDate);
+
+    function buildEvoSeries(metric, allNames) {
+        return allNames.map(name => {
+            const color = colorFor(name);
+            return {
+                label: name,
+                data: data.runs.map(r => r[metric][name] !== undefined ? r[metric][name] : null),
+                borderColor: color,
+                backgroundColor: color + '33',
+                tension: 0.25,
+                spanGaps: true,
+                pointRadius: 4,
+                borderWidth: 2
+            };
+        });
+    }
+
+    const evoOpts = {
+        responsive: true,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+            legend: { labels: { color: '#e0e0e0', boxWidth: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { title: (items) => evoDates[items[0].dataIndex] } }
+        },
+        scales: {
+            x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+            y: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } }
+        }
+    };
+
+    new Chart(document.getElementById('evoElo'), {
+        type: 'line',
+        data: { labels: evoLabels, datasets: buildEvoSeries('elo', data.allNames) },
+        options: evoOpts
+    });
+    new Chart(document.getElementById('evoWin'), {
+        type: 'line',
+        data: { labels: evoLabels, datasets: buildEvoSeries('win', data.allNames) },
+        options: { ...evoOpts, scales: { ...evoOpts.scales, y: { ...evoOpts.scales.y, max: 100 } } }
+    });
+}
+
+// ── Tableau ───────────────────────────────────────────────────────────────
+let tableHTML = `<table><thead><tr>
+<th>Rang</th><th>Joueur</th><th>Modèle</th><th>Famille</th><th>Type</th><th>Elo</th>
+<th>Victoires</th><th>Parties</th><th>Win%</th>
+<th>Temps moy./coup</th><th>Coups moy./partie</th></tr></thead><tbody>`;
+names.forEach((nm, idx) => {
+    const rank = idx + 1;
+    const rankClass = rank <= 3 ? `rank-${rank}` : '';
+    const t = data.playerTypes[nm];
+    const f = data.playerFamilies[nm];
+    const c = colorFor(nm);
+    tableHTML += `<tr>
+        <td class="${rankClass}">#${rank}</td>
+        <td>${nm}</td>
+        <td>${data.playerFiles[nm] || '-'}</td>
+        <td>${f}</td>
+        <td><span class="badge" style="background:${c}20;color:${c};border:1px solid ${c}40">${t}</span></td>
+        <td>${data.elo[nm].toFixed(0)}</td>
+        <td>${data.winsTotal[nm]}</td>
+        <td>${data.gamesTotal[nm]}</td>
+        <td>${data.winPct[nm].toFixed(1)}%</td>
+        <td>${data.avgTime[nm].toFixed(3)}s</td>
+        <td>${data.avgMoves[nm].toFixed(1)}</td>
+    </tr>`;
+});
+tableHTML += '</tbody></table>';
+document.getElementById('table-wrap').innerHTML = tableHTML;
+</script>
+</body>
+</html>

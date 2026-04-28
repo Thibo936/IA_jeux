@@ -46,7 +46,7 @@ python tournament.py alphabeta random 20
 python tournament.py alphabeta random 4 -v
 
 # Entraîner AlphaZero (test rapide)
-python trainer.py --iterations 1 --games 10 --simulations 100
+python train/trainer.py --iterations 1 --games 10 --simulations 100
 
 # Tournoi Alpha-Beta vs AlphaZero entraîné
 python tournament.py alphabeta alphazero 10 -t 2.0
@@ -79,12 +79,12 @@ python <ia>.py BOARD PLAYER [time_s]
 
 ```bash
 # Exemples
-python alphabeta.py "........................................................................................................................................................................................................." O
-python random_player.py "........................................................................................................................................................................................................." @
+python ia/alphabeta.py "........................................................................................................................................................................................................." O
+python ia/random_player.py "........................................................................................................................................................................................................." @
 python play.py "........................................................................................................................................................................................................." O 1.5
-python monte_carlo_pure.py "........................................................................................................................................................................................................." O 1.0
-python mcts_light.py "........................................................................................................................................................................................................." @ 1.0
-python heuristic_player.py "........................................................................................................................................................................................................." O
+python ia/monte_carlo_pure.py "........................................................................................................................................................................................................." O 1.0
+python ia/mcts_light.py "........................................................................................................................................................................................................." @ 1.0
+python ia/heuristic_player.py "........................................................................................................................................................................................................." O
 ```
 
 ---
@@ -115,13 +115,13 @@ Pipeline complet dans `alphazero/`. Lancer les scripts **depuis `alphazero/`**.
 cd alphazero
 
 # Test rapide (CPU)
-python trainer.py --iterations 1 --games 10 --simulations 100
+python train/trainer.py --iterations 1 --games 10 --simulations 100
 
 # Entraînement standard (GPU recommandé)
-python trainer.py --iterations 100 --games 100 --simulations 800 --steps 500 --device cuda
+python train/trainer.py --iterations 100 --games 100 --simulations 800 --steps 500 --device cuda
 
 # Sans évaluation (plus rapide)
-python trainer.py --iterations 20 --games 50 --simulations 200 --no-eval
+python train/trainer.py --iterations 20 --games 50 --simulations 200 --no-eval
 ```
 
 Avec un GPU AMD + ROCm, utiliser aussi `--device cuda` (backend `torch.cuda` côté PyTorch).
@@ -134,7 +134,7 @@ Avec un GPU AMD + ROCm, utiliser aussi `--device cuda` (backend `torch.cuda` cô
 | `--steps` | 300 | Pas d'entraînement par itération |
 | `--batch` | 512 | Taille du batch |
 | `--device` | auto | `cuda`, `cpu`, ou `auto` |
-| `--eval-games` | 40 | Parties pour l'évaluation |
+| `--eval-games` | 120 | Parties pour l'évaluation |
 | `--no-eval` | — | Désactive l'évaluation |
 
 **Google Colab :**
@@ -147,21 +147,40 @@ Utiliser `train_colab.ipynb` à la racine du projet pour un entraînement intens
 Checkpoints sauvegardés dans `alphazero/checkpoints/`.
 Le meilleur modèle est dans `best_model.pt` — remplacé si win rate ≥ 55 % sur 40 parties.
 
+Les modèles acceptés sont automatiquement copiés dans `alphazero/model/` avec le format `model_<num>_<parent>_<day>_<month>.pt` (ex: `model_05_04_23_04.pt`).
+
+### Classement unifié
+
+```bash
+cd alphazero
+
+# Tournoi complet (classiques + AZ) → rank/ranking.html
+python ranking.py --games 20
+
+# Seulement les classiques
+python ranking.py --mode classic --games 20
+
+# Seulement les variantes AZ
+python ranking.py --mode alphazero --games 20
+```
+
+Le CSV `rank/ranking.csv` est incrémental : seuls les matchups manquants sont rejoués.
+
 ### Évaluation
 
 ```bash
 cd alphazero
 
 # Win rate vs joueur aléatoire
-python evaluate.py
+python train/evaluate.py
 # → Win rate vs random : ~95% après quelques itérations
 
 # Test du moteur
-python -c "from hex_env import HexEnv; e = HexEnv(); print(e.get_state_tensor().shape)"
+python -c "from train.hex_env import HexEnv; e = HexEnv(); print(e.get_state_tensor().shape)"
 # → (3, 11, 11)
 
 # Test du réseau
-python network.py
+python train/network.py
 # → PASS si la loss descend correctement
 ```
 
@@ -199,21 +218,33 @@ Les couleurs (Blue/Red) alternent automatiquement à chaque partie.
 
 ```
 alphazero/
-├── hex_env.py        # Moteur Hex (état, BFS, tenseur 3×11×11, mirror)
-├── config.py         # Hyperparamètres centralisés
-├── alphabeta.py      # Joueur Alpha-Beta (heuristique BFS 0-1)
-├── random_player.py  # Joueur aléatoire
-├── monte_carlo_pure.py # Joueur Monte Carlo pur (rollouts aléatoires)
-├── mcts_light.py     # Joueur MCTS léger UCT (sans réseau)
-├── heuristic_player.py # Joueur heuristique glouton (BFS 0-1)
-├── network.py        # ResNet 10 blocs, 128 filtres — têtes politique + valeur (~3M params)
-├── mcts_az.py        # MCTS UCB-PUCT guidé par réseau (batch 16, virtual loss)
-├── self_play.py      # Génération de parties + buffer circulaire (200 000 pos.)
-├── trainer.py        # Boucle AlphaZero : self-play → train → eval → checkpoint
-├── evaluate.py       # Comparaison de modèles, test vs random
-├── play.py           # Wrapper CLI AlphaZero (protocole BOARD/PLAYER)
-├── tournament.py     # Tournoi Python (appels directs ou subprocess)
-train_colab.ipynb     # Notebook Colab (FP16, self-play parallèle, monitoring)
+├── ia/                  # joueurs IA
+│   ├── alphabeta.py
+│   ├── mcts_az.py
+│   ├── mcts_light.py
+│   ├── random_player.py
+│   ├── humain.py
+│   ├── mohex.py
+│   ├── katahex.py
+│   ├── heuristic_player.py
+│   └── monte_carlo_pure.py
+├── train/               # moteur AlphaZero + entraînement
+│   ├── config.py
+│   ├── hex_env.py
+│   ├── network.py
+│   ├── self_play.py
+│   ├── self_play.txt
+│   ├── evaluate.py
+│   └── trainer.py
+├── play.py              # CLI AlphaZero (reste à la racine)
+├── tournament.py
+├── ranking.py           # ⭐ tournoi unifié + rapport HTML unique
+├── model_naming.py      # gestion du nommage incrémental des modèles
+├── versus.py
+├── checkpoints/         # best_model.pt + model_iter_*.pt + replay_buffer.npz
+├── model/               # .pt des modèles acceptés (model_XX_PP_DD_MM.pt)
+├── rank/                # ranking.csv (incrémental) + ranking.html
+└── model_rank/          # archive (lecture seule)
 ```
 
 ### Moteur (`hex_env.py`)

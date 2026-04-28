@@ -38,3 +38,6 @@ WIN_RATE_THRESHOLD  = 0.55   # seuil pour accepter le nouveau modèle
 # ─── Checkpoints ──────────────────────────────────────────────────────────────
 CHECKPOINT_DIR = "checkpoints"
 BEST_MODEL_FILE = "checkpoints/best_model.pt"
+
+# ─── Stockage des modèles acceptés (copie incrémentale) ──────────────────────
+MODEL_DIR = "model"

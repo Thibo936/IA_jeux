@@ -34,13 +34,12 @@ alphazero/
 │   └── trainer.py
 ├── play.py              # CLI AlphaZero (reste à la racine)
 ├── tournament.py
-├── ranking.py / ranking_az.py / ranking_checkpoint.py
+├── ranking.py / ranking_checkpoint.py
 ├── versus.py
 ├── compare_rankings.py
 ├── checkpoints/
 ├── model/
-├── rank/
-└── model_rank/
+└── rank/
 ```
 
 ## Running
