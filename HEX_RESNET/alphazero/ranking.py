@@ -25,13 +25,13 @@ import argparse
 import csv
 import time
 import json
-import io
 import contextlib
+import multiprocessing as mp
 from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import combinations
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 import torch
 import numpy as np
@@ -48,7 +48,7 @@ import model_naming
 
 # ─── Constantes & catégorisation ─────────────────────────────────────────────
 
-DEFAULT_CLASSICS = ['random', 'alphabeta', 'mc_pure', 'mcts_light', 'heuristic', 'mohex']
+DEFAULT_CLASSICS = ['random', 'alphabeta', 'mc_pure', 'mcts_light', 'heuristic', 'mohex', 'gemini_3_1_pro_preview_v2']
 
 CLASSIC_DISPLAY = {
     'random':     'Random',
@@ -59,6 +59,7 @@ CLASSIC_DISPLAY = {
     'mcts':       'MCTS-Light',
     'heuristic':  'Heuristic',
     'mohex':      'MoHex',
+    'gemini_3_1_pro_preview_v2': 'Gemini 3.1 Pro V2',
 }
 
 CLASSIC_TYPE = {
@@ -70,6 +71,7 @@ CLASSIC_TYPE = {
     'mcts':       'MCTS',
     'heuristic':  'Heuristique',
     'mohex':      'MoHex',
+    'gemini_3_1_pro_preview_v2': 'Gemini',
 }
 
 CLASSIC_COLORS = {
@@ -79,10 +81,12 @@ CLASSIC_COLORS = {
     'MCTS':        '#2ecc71',
     'Heuristique': '#9b59b6',
     'MoHex':       '#1abc9c',
+    'Gemini':      '#1a73e8',
     'Inconnu':     '#34495e',
 }
 
 TIME_PER_MOVE = 0.5
+_STDERR_SINK = open(os.devnull, 'w')
 
 
 # ─── Inférence type/famille (compatibilité legacy) ──────────────────────────
@@ -134,6 +138,9 @@ def _make_classic(classic_id: str):
     if n == 'mohex':
         from mohex import MoHexPlayer
         return MoHexPlayer()
+    if n in ('gemini_3_1_pro_preview', 'gemini_3_1_pro_preview_v2'):
+        from gemini_3_1_pro_preview_V2 import Gemini31ProPreviewV2
+        return Gemini31ProPreviewV2()
 
     # Fallback dynamique : importer le module par son nom de fichier
     try:
@@ -198,7 +205,8 @@ def _az_name_from_path(path: str) -> str:
 
 
 def discover_alphazero_models(model_dir: str) -> list[tuple[str, str]]:
-    """Liste [(name, abs_path), ...] des .pt du dossier (vide si absent)."""
+    """Liste [(name, abs_path), ...] des .pt du dossier (vide si absent).
+    """
     if not os.path.isdir(model_dir):
         return []
     pts = sorted(f for f in os.listdir(model_dir) if f.endswith('.pt'))
@@ -254,7 +262,7 @@ def build_player_registry(args) -> list[PlayerEntry]:
             display = CLASSIC_DISPLAY.get(n, ia)
             ptype = CLASSIC_TYPE.get(n, 'Inconnu')
             _add(PlayerEntry(key=display, family='classic',
-                             type=ptype, classic_id=n))
+                             type=ptype, classic_id=ia))
 
     # 2. .pt du dossier model/
     if not args.no_models:
@@ -263,14 +271,17 @@ def build_player_registry(args) -> list[PlayerEntry]:
             _add(PlayerEntry(key=name, family='alphazero',
                              type='AlphaZero', source_path=path))
 
+        # Inclure aussi checkpoints/best_model.pt si présent.
+        best_ckpt = os.path.abspath(os.path.join(_dir, BEST_MODEL_FILE))
+        if os.path.isfile(best_ckpt):
+            _add(PlayerEntry(key=_az_name_from_path(best_ckpt), family='alphazero',
+                             type='AlphaZero', source_path=best_ckpt))
+
     # 4. --add
     for p in args.add or []:
+        ap = p
         if p.lower() in ('best', 'best_model', 'best_model.pt'):
             ap = os.path.join(_dir, BEST_MODEL_FILE)
-            if not os.path.isfile(ap):
-                ap = BEST_MODEL_FILE
-        else:
-            ap = p
         if not os.path.isfile(ap):
             alt = os.path.join(_dir, ap)
             if os.path.isfile(alt):
@@ -340,7 +351,7 @@ def play_game(player_blue, player_red, game_id: int) -> dict:
     while not env.is_terminal():
         cur = player_blue if env.blue_to_play else player_red
         t0 = time.time()
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(_STDERR_SINK):
             move = cur.select_move(env, TIME_PER_MOVE)
         elapsed = time.time() - t0
 
@@ -368,13 +379,16 @@ def play_game(player_blue, player_red, game_id: int) -> dict:
         'winner':        winner,
         'total_moves':   total_moves,
         'total_time':    time.time() - t_start,
-        'avg_time_blue': float(np.mean(times_blue)) if times_blue else 0.0,
-        'avg_time_red':  float(np.mean(times_red))  if times_red  else 0.0,
+        'avg_time_blue': (sum(times_blue) / len(times_blue)) if times_blue else 0.0,
+        'avg_time_red':  (sum(times_red) / len(times_red)) if times_red else 0.0,
     }
 
 
 def _play_one_game(task) -> dict:
-    player_a, player_b, name_a, name_b, game_index = task
+    player_a, player_b, name_a, name_b, game_index, clone_players = task
+    if clone_players:
+        player_a = deepcopy(player_a)
+        player_b = deepcopy(player_b)
     a_is_blue = (game_index % 2 == 0)
     if a_is_blue:
         g = play_game(player_a, player_b, game_index + 1)
@@ -393,12 +407,12 @@ def match(player_a, player_b, name_a: str, name_b: str,
           num_games: int, game_threads: int = 1) -> dict:
     """Round entre player_a et player_b sur num_games parties (couleurs alternées)."""
     if game_threads > 1:
-        tasks = [(deepcopy(player_a), deepcopy(player_b), name_a, name_b, i)
+        tasks = [(player_a, player_b, name_a, name_b, i, True)
                  for i in range(num_games)]
         with ThreadPoolExecutor(max_workers=game_threads) as pool:
             games = list(pool.map(_play_one_game, tasks))
     else:
-        games = [_play_one_game((player_a, player_b, name_a, name_b, i))
+        games = [_play_one_game((player_a, player_b, name_a, name_b, i, False))
                  for i in range(num_games)]
 
     wins_a = wins_b = 0
@@ -425,10 +439,42 @@ def match(player_a, player_b, name_a: str, name_b: str,
         'wins_a':     wins_a,
         'wins_b':     wins_b,
         'games':      games,
-        'avg_time_a': float(np.mean(times_a_all)) if times_a_all else 0.0,
-        'avg_time_b': float(np.mean(times_b_all)) if times_b_all else 0.0,
-        'avg_moves':  float(np.mean(moves_all))   if moves_all   else 0.0,
+        'avg_time_a': (sum(times_a_all) / len(times_a_all)) if times_a_all else 0.0,
+        'avg_time_b': (sum(times_b_all) / len(times_b_all)) if times_b_all else 0.0,
+        'avg_moves':  (sum(moves_all) / len(moves_all)) if moves_all else 0.0,
     }
+
+
+# ─── Workers de parallélisation ──────────────────────────────────────────────
+
+# Cache local par process worker (rempli par _cpu_worker_init lors du spawn).
+_WORKER_PLAYERS: dict = {}
+
+
+def _cpu_worker_init(classic_specs: dict, time_per_move: float) -> None:
+    """Initializer du ProcessPool : reconstruit les joueurs classiques une fois par process."""
+    global _WORKER_PLAYERS, TIME_PER_MOVE
+    TIME_PER_MOVE = time_per_move
+    _WORKER_PLAYERS = {key: _make_classic(cid) for key, cid in classic_specs.items()}
+
+
+def _cpu_worker_task(name_a: str, name_b: str, num_games: int, game_threads: int) -> dict:
+    """Tâche exécutée dans un process worker pour un matchup classique-vs-classique."""
+    pa = _WORKER_PLAYERS[name_a]
+    pb = _WORKER_PLAYERS[name_b]
+    return match(pa, pb, name_a, name_b, num_games, game_threads=game_threads)
+
+
+def _thread_worker_task(player_a, player_b, name_a: str, name_b: str,
+                        num_games: int, game_threads: int) -> dict:
+    """Tâche exécutée dans un thread pour un matchup impliquant un AZ.
+
+    Deepcopy pour isoler les arbres MCTS internes ; le réseau PyTorch est
+    partagé via AlphaZeroPlayer.__deepcopy__ (cf. tournament.py).
+    """
+    pa = deepcopy(player_a)
+    pb = deepcopy(player_b)
+    return match(pa, pb, name_a, name_b, num_games, game_threads=game_threads)
 
 
 # ─── Calcul Elo ──────────────────────────────────────────────────────────────
@@ -500,9 +546,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   <div class="card"><h2>Taux de Victoire (%)</h2><canvas id="winChart"></canvas></div>
   <div class="card"><h2>Temps moyen par coup (s)</h2><canvas id="timeChart"></canvas></div>
   <div class="card"><h2>Durée moyenne des parties (coups)</h2><canvas id="movesChart"></canvas></div>
+  <div class="card full-width"><h2>Profil radar (Elo, Win%, Vitesse, Brièveté — tous normalisés 0-100)</h2><canvas id="radarChart" style="max-height:520px"></canvas></div>
   <div class="card full-width"><h2>Matrice des confrontations (taux de victoire ligne vs colonne)</h2><div id="heatmap" class="heatmap"></div></div>
-  <div class="card full-width"><h2>Évolution temporelle — Elo</h2><canvas id="evoElo"></canvas></div>
-  <div class="card full-width"><h2>Évolution temporelle — Win%</h2><canvas id="evoWin"></canvas></div>
   <div class="card full-width"><h2>Classement détaillé</h2><div id="table-wrap"></div></div>
 </div>
 
@@ -518,6 +563,7 @@ const TYPE_COLORS = {
     'Heuristique': '#9b59b6',
     'MoHex': '#1abc9c',
     'AlphaZero': '#e74c3c',
+    'Gemini': '#1a73e8',
 };
 
 function colorFor(name) {
@@ -529,13 +575,12 @@ function colorFor(name) {
 const n = data.names.length;
 const totalMatchups = n * (n - 1) / 2;
 const totalGames = data.results.reduce((s, r) => s + r.winsA + r.winsB, 0);
-const runsCount = data.runs ? data.runs.length : 1;
 document.getElementById('subtitle').textContent =
-    `Tournoi round-robin • ${n} joueurs • ${totalMatchups} matchups • ${data.games_per_matchup} parties/matchup • ${data.sims} sims/coup • ${runsCount} runs • Généré le ${data.generated_at_human}`;
+    `Tournoi round-robin • ${n} joueurs • ${totalMatchups} matchups • ${data.games_per_matchup} parties/matchup • ${data.sims} sims/coup • Généré le ${data.generated_at_human}`;
 
 const statsRow = document.getElementById('stats-row');
 [['Joueurs', n], ['Matchups', totalMatchups], ['Parties totales', totalGames],
- ['Runs', runsCount], ['Temps total', `${Math.round(data.total_time)}s`],
+ ['Temps total', `${Math.round(data.total_time)}s`],
  ['Sims/coup', data.sims]
 ].forEach(([label, value]) => {
     statsRow.insertAdjacentHTML('beforeend',
@@ -581,6 +626,49 @@ new Chart(document.getElementById('movesChart'), {
     options: chartOpts
 });
 
+// ── Radar (4 axes normalisés 0-100) ───────────────────────────────────────
+function normalize(values, invert) {
+    const min = Math.min(...values), max = Math.max(...values);
+    const span = max - min || 1;
+    return values.map(v => {
+        const x = (v - min) / span * 100;
+        return invert ? 100 - x : x;
+    });
+}
+const eloNorm   = normalize(eloData,   false);
+const winNorm   = normalize(winData,   false);
+const timeNorm  = normalize(timeData,  true);   // moins de temps = mieux
+const movesNorm = normalize(movesData, true);   // parties courtes = mieux
+
+const radarDatasets = names.map((nm, i) => {
+    const c = colorFor(nm);
+    return {
+        label: nm,
+        data: [eloNorm[i], winNorm[i], timeNorm[i], movesNorm[i]],
+        borderColor: c,
+        backgroundColor: c + '20',
+        borderWidth: 2,
+        pointRadius: 3,
+    };
+});
+new Chart(document.getElementById('radarChart'), {
+    type: 'radar',
+    data: { labels: ['Elo', 'Win%', 'Vitesse', 'Brièveté'], datasets: radarDatasets },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'right', labels: { color: '#e0e0e0', font: { size: 11 } } } },
+        scales: {
+            r: {
+                min: 0, max: 100,
+                grid:        { color: '#2a3a4a' },
+                angleLines:  { color: '#2a3a4a' },
+                pointLabels: { color: '#00d4ff', font: { size: 13 } },
+                ticks:       { color: '#888', backdropColor: 'transparent', stepSize: 25 },
+            }
+        }
+    }
+});
+
 // ── Heatmap ───────────────────────────────────────────────────────────────
 const resultMap = {};
 data.results.forEach(r => { resultMap[r.a + '|' + r.b] = r; });
@@ -609,52 +697,6 @@ names.forEach((a, i) => {
         heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
     });
 });
-
-// ── Évolution temporelle (courbes) ────────────────────────────────────────
-if (data.runs && data.runs.length > 1) {
-    const evoLabels = data.runs.map(r => r.date);
-    const evoDates = data.runs.map(r => r.fullDate);
-
-    function buildEvoSeries(metric, allNames) {
-        return allNames.map(name => {
-            const color = colorFor(name);
-            return {
-                label: name,
-                data: data.runs.map(r => r[metric][name] !== undefined ? r[metric][name] : null),
-                borderColor: color,
-                backgroundColor: color + '33',
-                tension: 0.25,
-                spanGaps: true,
-                pointRadius: 4,
-                borderWidth: 2
-            };
-        });
-    }
-
-    const evoOpts = {
-        responsive: true,
-        interaction: { mode: 'nearest', intersect: false },
-        plugins: {
-            legend: { labels: { color: '#e0e0e0', boxWidth: 12, font: { size: 11 } } },
-            tooltip: { callbacks: { title: (items) => evoDates[items[0].dataIndex] } }
-        },
-        scales: {
-            x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
-            y: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } }
-        }
-    };
-
-    new Chart(document.getElementById('evoElo'), {
-        type: 'line',
-        data: { labels: evoLabels, datasets: buildEvoSeries('elo', data.allNames) },
-        options: evoOpts
-    });
-    new Chart(document.getElementById('evoWin'), {
-        type: 'line',
-        data: { labels: evoLabels, datasets: buildEvoSeries('win', data.allNames) },
-        options: { ...evoOpts, scales: { ...evoOpts.scales, y: { ...evoOpts.scales.y, max: 100 } } }
-    });
-}
 
 // ── Tableau ───────────────────────────────────────────────────────────────
 let tableHTML = `<table><thead><tr>
@@ -718,8 +760,8 @@ def main():
                         help=".pt supplémentaires")
     parser.add_argument('--games', type=int, default=50,
                         help="Parties par matchup (défaut: 50)")
-    parser.add_argument('--sims', type=int, default=600,
-                        help="Simulations MCTS AZ (défaut: 600)")
+    parser.add_argument('--sims', type=int, default=400,
+                        help="Simulations MCTS AZ (défaut: 400)")
     parser.add_argument('--time', type=float, default=0.5,
                         help="Budget temps classiques (défaut: 0.5s)")
     parser.add_argument('--output-dir', type=str,
@@ -735,8 +777,12 @@ def main():
                         help="Pas de CSV")
     parser.add_argument('--device', type=str, default=None,
                         help="Device (cuda/cpu, défaut: auto)")
-    parser.add_argument('--workers', type=int, default=1,
-                        help="Matchups parallèles (défaut: 1)")
+    parser.add_argument('--workers', type=int, default=0,
+                        help="Process workers pour les matchups CPU-only "
+                             "(0 = auto = max(1, nproc-2), défaut: 0)")
+    parser.add_argument('--gpu-workers', type=int, default=2,
+                        help="Threads workers pour les matchups impliquant "
+                             "un AlphaZero (défaut: 2)")
     parser.add_argument('--game-threads', type=int, default=1,
                         help="Parties parallèles par matchup (défaut: 1)")
     parser.add_argument('--mode', choices=['all', 'classic', 'alphazero'],
@@ -748,6 +794,13 @@ def main():
 
     device = (torch.device(args.device) if args.device
               else torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
+        try:
+            torch.set_float32_matmul_precision('high')
+        except Exception:
+            pass
 
     # 1. Registre
     print("Construction du registre des joueurs...")
@@ -822,6 +875,14 @@ def main():
     else:
         print("Aucun CSV existant, tournoi complet.")
 
+    total_games_to_play = 0
+    for i, j in matchups:
+        key = (valid[i].key, valid[j].key)
+        already = existing_matchups.get(key, {}).get('games', 0)
+        total_games_to_play += max(0, args.games - already)
+    print(f"Parties à jouer au total : {total_games_to_play} "
+          f"(sur {total_matchups * args.games} prévues, {total_matchups} matchups).")
+
     # 4. Calcul des matchups manquants
     by_key = {e.key: e for e in valid}
     results: dict[tuple[str, str], tuple[int, int]] = {}
@@ -831,18 +892,7 @@ def main():
     moves_total = {e.key: 0.0 for e in valid}
 
     pair_keys = [(valid[i].key, valid[j].key) for i, j in matchups]
-    matchup_count = 0
     t_start = time.time()
-
-    def _run_matchup(name_a: str, name_b: str, num_games: int) -> dict:
-        if args.workers > 1:
-            pa = deepcopy(by_key[name_a].player)
-            pb = deepcopy(by_key[name_b].player)
-        else:
-            pa = by_key[name_a].player
-            pb = by_key[name_b].player
-        return match(pa, pb, name_a, name_b, num_games,
-                     game_threads=args.game_threads)
 
     csv_file = None
     csv_writer = None
@@ -859,17 +909,23 @@ def main():
                 'sims', 'time_per_move',
             ])
 
+    # 4a. Partition : skip immédiat des matchups déjà complets ; les autres sont
+    # rangés par profil de charge (CPU pur, mixte CPU/GPU, GPU pur).
+    todo_cpu: list[tuple[str, str, int, dict]] = []
+    todo_mixed: list[tuple[str, str, int, dict]] = []
+    todo_gpu: list[tuple[str, str, int, dict]] = []
+    skipped = 0
+
     for na, nb in pair_keys:
-        matchup_count += 1
         key = (na, nb)
-        existing = existing_matchups.get(key, {'wins_a': 0, 'wins_b': 0, 'games': 0,
-                                                'sum_time_a': 0.0, 'sum_time_b': 0.0, 'sum_moves': 0})
+        existing = existing_matchups.get(key, {
+            'wins_a': 0, 'wins_b': 0, 'games': 0,
+            'sum_time_a': 0.0, 'sum_time_b': 0.0, 'sum_moves': 0,
+        })
         missing = args.games - existing['games']
 
         if missing <= 0:
-            sys.stdout.write(f"\r  [{matchup_count}/{total_matchups}] {na} vs {nb} "
-                             f"({existing['games']}/{args.games} déjà jouées) — skip\n")
-            sys.stdout.flush()
+            skipped += 1
             results[key] = (existing['wins_a'], existing['wins_b'])
             wins_total[na] += existing['wins_a']
             wins_total[nb] += existing['wins_b']
@@ -881,11 +937,26 @@ def main():
             moves_total[nb] += existing['sum_moves']
             continue
 
-        sys.stdout.write(f"\r  [{matchup_count}/{total_matchups}] {na} vs {nb} "
-                         f"(+{missing} parties) ...")
-        sys.stdout.flush()
-        mr = _run_matchup(na, nb, missing)
+        fa = by_key[na].family
+        fb = by_key[nb].family
+        if fa == 'classic' and fb == 'classic':
+            todo_cpu.append((na, nb, missing, existing))
+        elif fa == 'alphazero' and fb == 'alphazero':
+            todo_gpu.append((na, nb, missing, existing))
+        else:
+            todo_mixed.append((na, nb, missing, existing))
 
+    total_todo = len(todo_cpu) + len(todo_mixed) + len(todo_gpu)
+    print(f"Matchups : {skipped} déjà complets, {total_todo} à jouer "
+          f"({len(todo_cpu)} CPU-only, {len(todo_mixed)} mixtes, "
+          f"{len(todo_gpu)} GPU-only).")
+
+    # 4b. Callback central — exécuté dans le main thread via as_completed,
+    # donc pas besoin de lock pour l'écriture CSV ni pour les accumulateurs.
+    done_count = [0]
+
+    def _on_match_done(na: str, nb: str, missing: int, existing: dict, mr: dict) -> None:
+        done_count[0] += 1
         if csv_writer is not None:
             for g in mr['games']:
                 csv_writer.writerow([
@@ -901,7 +972,7 @@ def main():
 
         total_wins_a = existing['wins_a'] + mr['wins_a']
         total_wins_b = existing['wins_b'] + mr['wins_b']
-        results[key] = (total_wins_a, total_wins_b)
+        results[(na, nb)] = (total_wins_a, total_wins_b)
         wins_total[na] += total_wins_a
         wins_total[nb] += total_wins_b
         games_total[na] += args.games
@@ -911,12 +982,86 @@ def main():
         moves_total[na] += existing['sum_moves'] + mr['avg_moves'] * missing
         moves_total[nb] += existing['sum_moves'] + mr['avg_moves'] * missing
 
-        sys.stdout.write(
-            f"\r  [{matchup_count}/{total_matchups}] "
-            f"{na} {total_wins_a}-{total_wins_b} {nb}"
-            + " " * 20 + "\n"
-        )
-        sys.stdout.flush()
+        print(f"  [{done_count[0]}/{total_todo}] "
+              f"{na} {total_wins_a}-{total_wins_b} {nb}", flush=True)
+
+    # 4c. Exécution parallèle des matchups CPU-only et AZ/mixte.
+    todo_cpu.sort(key=lambda x: x[2], reverse=True)
+    todo_mixed.sort(key=lambda x: x[2], reverse=True)
+    todo_gpu.sort(key=lambda x: x[2], reverse=True)
+    todo_az = todo_mixed + todo_gpu
+
+    cpu_workers = 0
+    run_cpu_pool = False
+    classic_specs = {}
+    if todo_cpu:
+        cpu_workers = args.workers if args.workers > 0 \
+            else max(1, (os.cpu_count() or 2) - 2)
+        cpu_workers = min(cpu_workers, len(todo_cpu))
+        keys_used = {k for na, nb, _, _ in todo_cpu for k in (na, nb)}
+        classic_specs = {k: by_key[k].classic_id for k in keys_used}
+        # Même avec 1 worker CPU, on garde un process dédié s'il y a des
+        # matchups AZ pour overlap CPU/GPU.
+        run_cpu_pool = (cpu_workers > 1) or bool(todo_az)
+        mode_cpu = 'ProcessPool' if run_cpu_pool else 'séquentiel'
+        print(f"  → CPU-only : {mode_cpu} ({cpu_workers} workers)")
+
+    gpu_workers = 0
+    run_gpu_pool = False
+    if todo_az:
+        gpu_workers = max(1, args.gpu_workers)
+        gpu_workers = min(gpu_workers, len(todo_az))
+        run_gpu_pool = (gpu_workers > 1) or bool(todo_cpu)
+        mode_gpu = 'ThreadPool' if run_gpu_pool else 'séquentiel'
+        print(f"  → AZ/mixte : {mode_gpu} ({gpu_workers} workers, "
+              f"{len(todo_mixed)} mixtes + {len(todo_gpu)} GPU)")
+
+    future_meta: dict = {}
+    cpu_seq: list[tuple[str, str, int, dict]] = []
+    az_seq: list[tuple[str, str, int, dict]] = []
+
+    with contextlib.ExitStack() as stack:
+        if run_cpu_pool:
+            ctx = mp.get_context('spawn')
+            cpu_pool = stack.enter_context(ProcessPoolExecutor(
+                max_workers=cpu_workers,
+                mp_context=ctx,
+                initializer=_cpu_worker_init,
+                initargs=(classic_specs, args.time),
+            ))
+            for na, nb, missing, existing in todo_cpu:
+                fut = cpu_pool.submit(_cpu_worker_task, na, nb, missing, args.game_threads)
+                future_meta[fut] = (na, nb, missing, existing)
+        elif todo_cpu:
+            _cpu_worker_init(classic_specs, args.time)
+            cpu_seq = todo_cpu
+
+        if run_gpu_pool:
+            az_pool = stack.enter_context(ThreadPoolExecutor(max_workers=gpu_workers))
+            for na, nb, missing, existing in todo_az:
+                fut = az_pool.submit(
+                    _thread_worker_task,
+                    by_key[na].player, by_key[nb].player,
+                    na, nb, missing,
+                    args.game_threads,
+                )
+                future_meta[fut] = (na, nb, missing, existing)
+        else:
+            az_seq = todo_az
+
+        for fut in as_completed(future_meta):
+            na, nb, missing, existing = future_meta[fut]
+            mr = fut.result()
+            _on_match_done(na, nb, missing, existing, mr)
+
+        for na, nb, missing, existing in cpu_seq:
+            mr = _cpu_worker_task(na, nb, missing, args.game_threads)
+            _on_match_done(na, nb, missing, existing, mr)
+
+        for na, nb, missing, existing in az_seq:
+            mr = _thread_worker_task(by_key[na].player, by_key[nb].player,
+                                     na, nb, missing, args.game_threads)
+            _on_match_done(na, nb, missing, existing, mr)
 
     total_time = time.time() - t_start
 

@@ -1,0 +1,2340 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Classement Hex 11×11 — Tournoi unifié</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }
+  h1 { text-align: center; color: #00d4ff; margin-bottom: 0.5rem; font-size: 2rem; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .card { background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }
+  .card.az h2 { color: #e74c3c; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; font-size: 0.85rem; word-break: break-all; }
+  th { color: #00d4ff; font-weight: 600; }
+  tr:hover { background: #243447; }
+  .rank-1 { color: #ffd700; font-weight: bold; }
+  .rank-2 { color: #c0c0c0; font-weight: bold; }
+  .rank-3 { color: #cd7f32; font-weight: bold; }
+  .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .heatmap { display: grid; gap: 2px; margin-top: 1rem; overflow-x: auto; }
+  .heatmap-cell { padding: 0.4rem; text-align: center; font-size: 0.7rem; border-radius: 3px; }
+  .heatmap-header { font-weight: 600; color: #00d4ff; font-size: 0.65rem; word-break: break-all; }
+  .stats-row { display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+  .stat-box { background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }
+  .stat-box .value { font-size: 1.8rem; font-weight: bold; color: #00d4ff; }
+  .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+  canvas { max-height: 350px; }
+  .full-width { grid-column: 1 / -1; }
+  .section-title { color: #00d4ff; font-size: 1.4rem; margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #2a3a4a; }
+  .az-title { color: #e74c3c; }
+  .delta-pos { color: #2ecc71; font-weight: 600; }
+  .delta-neg { color: #e74c3c; font-weight: 600; }
+  .delta-zero { color: #888; }
+</style>
+</head>
+<body>
+<h1>Classement Hex 11×11 — Tournoi unifié</h1>
+<p id="subtitle" class="subtitle"></p>
+
+<div class="stats-row" id="stats-row"></div>
+
+<div class="grid">
+  <div class="card"><h2>Score Elo</h2><canvas id="eloChart"></canvas></div>
+  <div class="card"><h2>Taux de Victoire (%)</h2><canvas id="winChart"></canvas></div>
+  <div class="card"><h2>Temps moyen par coup (s)</h2><canvas id="timeChart"></canvas></div>
+  <div class="card"><h2>Durée moyenne des parties (coups)</h2><canvas id="movesChart"></canvas></div>
+  <div class="card full-width"><h2>Profil radar (Elo, Win%, Vitesse, Brièveté — tous normalisés 0-100)</h2><canvas id="radarChart" style="max-height:520px"></canvas></div>
+  <div class="card full-width"><h2>Matrice des confrontations (taux de victoire ligne vs colonne)</h2><div id="heatmap" class="heatmap"></div></div>
+  <div class="card full-width"><h2>Classement détaillé</h2><div id="table-wrap"></div></div>
+</div>
+
+<script id="ranking-data" type="application/json">{
+  "schema_version": 2,
+  "generated_at": "2026-05-05T16:38:33",
+  "generated_at_human": "05/05/2026 à 16:38",
+  "games_per_matchup": 50,
+  "sims": 600,
+  "time_per_move": 0.5,
+  "total_time": 9226.671622991562,
+  "names": [
+    "claude_opus_4_7_xhigh_V2",
+    "AlphaBeta",
+    "AZ-10",
+    "AZ-11",
+    "AZ-best",
+    "AZ-12",
+    "AZ-06",
+    "AZ-07",
+    "AZ-01_2",
+    "AZ-08",
+    "AZ-04",
+    "AZ-03",
+    "AZ-13",
+    "gpt53_codex_xhigh",
+    "AZ-05",
+    "deepseek_v4_pro_max_V3",
+    "AZ-01",
+    "MoHex",
+    "mimo_v25_pro_V2",
+    "heuristic_player",
+    "MCTS-Light",
+    "kimi_k26_V3",
+    "Gemini 3.1 Pro V2",
+    "minimax_m2_V2",
+    "qwen36plus_V2"
+  ],
+  "playerTypes": {
+    "AlphaBeta": "Alpha-Beta",
+    "claude_opus_4_7_xhigh_V2": "Inconnu",
+    "deepseek_v4_pro_max_V3": "Inconnu",
+    "Gemini 3.1 Pro V2": "Gemini",
+    "gpt53_codex_xhigh": "Inconnu",
+    "heuristic_player": "Inconnu",
+    "kimi_k26_V3": "Inconnu",
+    "MCTS-Light": "MCTS",
+    "mimo_v25_pro_V2": "Inconnu",
+    "minimax_m2_V2": "Inconnu",
+    "MoHex": "MoHex",
+    "qwen36plus_V2": "Inconnu",
+    "AZ-best": "AlphaZero",
+    "AZ-01": "AlphaZero",
+    "AZ-01_2": "AlphaZero",
+    "AZ-03": "AlphaZero",
+    "AZ-04": "AlphaZero",
+    "AZ-05": "AlphaZero",
+    "AZ-06": "AlphaZero",
+    "AZ-07": "AlphaZero",
+    "AZ-08": "AlphaZero",
+    "AZ-10": "AlphaZero",
+    "AZ-11": "AlphaZero",
+    "AZ-12": "AlphaZero",
+    "AZ-13": "AlphaZero"
+  },
+  "playerFamilies": {
+    "AlphaBeta": "classic",
+    "claude_opus_4_7_xhigh_V2": "classic",
+    "deepseek_v4_pro_max_V3": "classic",
+    "Gemini 3.1 Pro V2": "classic",
+    "gpt53_codex_xhigh": "classic",
+    "heuristic_player": "classic",
+    "kimi_k26_V3": "classic",
+    "MCTS-Light": "classic",
+    "mimo_v25_pro_V2": "classic",
+    "minimax_m2_V2": "classic",
+    "MoHex": "classic",
+    "qwen36plus_V2": "classic",
+    "AZ-best": "alphazero",
+    "AZ-01": "alphazero",
+    "AZ-01_2": "alphazero",
+    "AZ-03": "alphazero",
+    "AZ-04": "alphazero",
+    "AZ-05": "alphazero",
+    "AZ-06": "alphazero",
+    "AZ-07": "alphazero",
+    "AZ-08": "alphazero",
+    "AZ-10": "alphazero",
+    "AZ-11": "alphazero",
+    "AZ-12": "alphazero",
+    "AZ-13": "alphazero"
+  },
+  "playerPaths": {
+    "AlphaBeta": null,
+    "claude_opus_4_7_xhigh_V2": null,
+    "deepseek_v4_pro_max_V3": null,
+    "Gemini 3.1 Pro V2": null,
+    "gpt53_codex_xhigh": null,
+    "heuristic_player": null,
+    "kimi_k26_V3": null,
+    "MCTS-Light": null,
+    "mimo_v25_pro_V2": null,
+    "minimax_m2_V2": null,
+    "MoHex": null,
+    "qwen36plus_V2": null,
+    "AZ-best": "model/best_model.pt",
+    "AZ-01": "model/model_01_00_17_04.pt",
+    "AZ-01_2": "model/model_01_00_18_04.pt",
+    "AZ-03": "model/model_03_01_18_04.pt",
+    "AZ-04": "model/model_04_02_22_04.pt",
+    "AZ-05": "model/model_05_04_23_04.pt",
+    "AZ-06": "model/model_06_04_24_04.pt",
+    "AZ-07": "model/model_07_03_25_04.pt",
+    "AZ-08": "model/model_08_07_29_04.pt",
+    "AZ-10": "model/model_10_09_30_04.pt",
+    "AZ-11": "model/model_11_10_01_05.pt",
+    "AZ-12": "model/model_12_11_03_05.pt",
+    "AZ-13": "model/model_13_12_04_05.pt"
+  },
+  "playerFiles": {
+    "AlphaBeta": null,
+    "claude_opus_4_7_xhigh_V2": null,
+    "deepseek_v4_pro_max_V3": null,
+    "Gemini 3.1 Pro V2": null,
+    "gpt53_codex_xhigh": null,
+    "heuristic_player": null,
+    "kimi_k26_V3": null,
+    "MCTS-Light": null,
+    "mimo_v25_pro_V2": null,
+    "minimax_m2_V2": null,
+    "MoHex": null,
+    "qwen36plus_V2": null,
+    "AZ-best": "best_model.pt",
+    "AZ-01": "model_01_00_17_04.pt",
+    "AZ-01_2": "model_01_00_18_04.pt",
+    "AZ-03": "model_03_01_18_04.pt",
+    "AZ-04": "model_04_02_22_04.pt",
+    "AZ-05": "model_05_04_23_04.pt",
+    "AZ-06": "model_06_04_24_04.pt",
+    "AZ-07": "model_07_03_25_04.pt",
+    "AZ-08": "model_08_07_29_04.pt",
+    "AZ-10": "model_10_09_30_04.pt",
+    "AZ-11": "model_11_10_01_05.pt",
+    "AZ-12": "model_12_11_03_05.pt",
+    "AZ-13": "model_13_12_04_05.pt"
+  },
+  "elo": {
+    "AlphaBeta": 1218.651714447571,
+    "claude_opus_4_7_xhigh_V2": 1427.8611164545478,
+    "deepseek_v4_pro_max_V3": 1065.2825373921012,
+    "Gemini 3.1 Pro V2": 565.6570063176678,
+    "gpt53_codex_xhigh": 1137.801305278348,
+    "heuristic_player": 752.6685498626782,
+    "kimi_k26_V3": 566.4221218218689,
+    "MCTS-Light": 587.8177396507599,
+    "mimo_v25_pro_V2": 791.8796317383319,
+    "minimax_m2_V2": 498.88081304316034,
+    "MoHex": 845.771429883569,
+    "qwen36plus_V2": 491.4368964855154,
+    "AZ-best": 1199.042869481659,
+    "AZ-01": 963.1594092885585,
+    "AZ-01_2": 1171.1956400861295,
+    "AZ-03": 1149.262781557066,
+    "AZ-04": 1165.2940341070187,
+    "AZ-05": 1137.3196483904012,
+    "AZ-06": 1177.088020783335,
+    "AZ-07": 1172.9093842116397,
+    "AZ-08": 1170.8922064790784,
+    "AZ-10": 1199.8133585385274,
+    "AZ-11": 1199.350775921204,
+    "AZ-12": 1196.5545743346909,
+    "AZ-13": 1147.9864344445732
+  },
+  "winPct": {
+    "AlphaBeta": 69.91666666666667,
+    "claude_opus_4_7_xhigh_V2": 88.75,
+    "deepseek_v4_pro_max_V3": 54.25,
+    "Gemini 3.1 Pro V2": 13.0,
+    "gpt53_codex_xhigh": 60.416666666666664,
+    "heuristic_player": 26.25,
+    "kimi_k26_V3": 13.333333333333334,
+    "MCTS-Light": 14.583333333333334,
+    "mimo_v25_pro_V2": 27.666666666666668,
+    "minimax_m2_V2": 9.333333333333334,
+    "MoHex": 33.166666666666664,
+    "qwen36plus_V2": 8.916666666666666,
+    "AZ-best": 69.08333333333333,
+    "AZ-01": 44.333333333333336,
+    "AZ-01_2": 65.33333333333333,
+    "AZ-03": 61.5,
+    "AZ-04": 64.58333333333333,
+    "AZ-05": 61.5,
+    "AZ-06": 65.41666666666667,
+    "AZ-07": 65.33333333333333,
+    "AZ-08": 65.0,
+    "AZ-10": 69.16666666666667,
+    "AZ-11": 69.0,
+    "AZ-12": 68.58333333333333,
+    "AZ-13": 61.583333333333336
+  },
+  "avgTime": {
+    "AlphaBeta": 0.15517766766568505,
+    "claude_opus_4_7_xhigh_V2": 0.4096596135768524,
+    "deepseek_v4_pro_max_V3": 0.4559226073253555,
+    "Gemini 3.1 Pro V2": 0.44859683633360486,
+    "gpt53_codex_xhigh": 0.4364792397952401,
+    "heuristic_player": 0.031060769266246097,
+    "kimi_k26_V3": 0.4176910643253596,
+    "MCTS-Light": 0.5001848336969055,
+    "mimo_v25_pro_V2": 0.4215658203165234,
+    "minimax_m2_V2": 0.46681558126635403,
+    "MoHex": 0.4864328498670126,
+    "qwen36plus_V2": 0.4904180412271256,
+    "AZ-best": 0.21540777418911078,
+    "AZ-01": 0.2389375474083755,
+    "AZ-01_2": 0.24979261402120181,
+    "AZ-03": 0.23248573552899393,
+    "AZ-04": 0.22914335455728596,
+    "AZ-05": 0.2218608767486559,
+    "AZ-06": 0.2425445638101323,
+    "AZ-07": 0.22974343722851298,
+    "AZ-08": 0.2146517255625137,
+    "AZ-10": 0.2153329772187025,
+    "AZ-11": 0.21519286998555856,
+    "AZ-12": 0.21587163035210957,
+    "AZ-13": 0.21503406065499267
+  },
+  "avgMoves": {
+    "AlphaBeta": 30.906666666666666,
+    "claude_opus_4_7_xhigh_V2": 28.625833333333333,
+    "deepseek_v4_pro_max_V3": 40.54333333333334,
+    "Gemini 3.1 Pro V2": 37.215,
+    "gpt53_codex_xhigh": 38.14666666666667,
+    "heuristic_player": 30.734166666666667,
+    "kimi_k26_V3": 38.27166666666667,
+    "MCTS-Light": 34.365833333333335,
+    "mimo_v25_pro_V2": 39.83416666666667,
+    "minimax_m2_V2": 34.651666666666664,
+    "MoHex": 41.05833333333333,
+    "qwen36plus_V2": 40.280833333333334,
+    "AZ-best": 30.5725,
+    "AZ-01": 39.17,
+    "AZ-01_2": 32.065,
+    "AZ-03": 29.723333333333333,
+    "AZ-04": 26.725,
+    "AZ-05": 27.370833333333334,
+    "AZ-06": 28.7225,
+    "AZ-07": 27.375833333333333,
+    "AZ-08": 27.616666666666667,
+    "AZ-10": 30.701666666666668,
+    "AZ-11": 30.61916666666667,
+    "AZ-12": 30.615,
+    "AZ-13": 29.358333333333334
+  },
+  "winsTotal": {
+    "AlphaBeta": 839,
+    "claude_opus_4_7_xhigh_V2": 1065,
+    "deepseek_v4_pro_max_V3": 651,
+    "Gemini 3.1 Pro V2": 156,
+    "gpt53_codex_xhigh": 725,
+    "heuristic_player": 315,
+    "kimi_k26_V3": 160,
+    "MCTS-Light": 175,
+    "mimo_v25_pro_V2": 332,
+    "minimax_m2_V2": 112,
+    "MoHex": 398,
+    "qwen36plus_V2": 107,
+    "AZ-best": 829,
+    "AZ-01": 532,
+    "AZ-01_2": 784,
+    "AZ-03": 738,
+    "AZ-04": 775,
+    "AZ-05": 738,
+    "AZ-06": 785,
+    "AZ-07": 784,
+    "AZ-08": 780,
+    "AZ-10": 830,
+    "AZ-11": 828,
+    "AZ-12": 823,
+    "AZ-13": 739
+  },
+  "gamesTotal": {
+    "AlphaBeta": 1200,
+    "claude_opus_4_7_xhigh_V2": 1200,
+    "deepseek_v4_pro_max_V3": 1200,
+    "Gemini 3.1 Pro V2": 1200,
+    "gpt53_codex_xhigh": 1200,
+    "heuristic_player": 1200,
+    "kimi_k26_V3": 1200,
+    "MCTS-Light": 1200,
+    "mimo_v25_pro_V2": 1200,
+    "minimax_m2_V2": 1200,
+    "MoHex": 1200,
+    "qwen36plus_V2": 1200,
+    "AZ-best": 1200,
+    "AZ-01": 1200,
+    "AZ-01_2": 1200,
+    "AZ-03": 1200,
+    "AZ-04": 1200,
+    "AZ-05": 1200,
+    "AZ-06": 1200,
+    "AZ-07": 1200,
+    "AZ-08": 1200,
+    "AZ-10": 1200,
+    "AZ-11": 1200,
+    "AZ-12": 1200,
+    "AZ-13": 1200
+  },
+  "results": [
+    {
+      "a": "AlphaBeta",
+      "b": "claude_opus_4_7_xhigh_V2",
+      "winsA": 8,
+      "winsB": 42
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "deepseek_v4_pro_max_V3",
+      "winsA": 37,
+      "winsB": 13
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "Gemini 3.1 Pro V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 29,
+      "winsB": 21
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "heuristic_player",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "kimi_k26_V3",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 41,
+      "winsB": 9
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "minimax_m2_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "MoHex",
+      "winsA": 49,
+      "winsB": 1
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "qwen36plus_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-best",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-01",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-01_2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-03",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-13",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "deepseek_v4_pro_max_V3",
+      "winsA": 48,
+      "winsB": 2
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "Gemini 3.1 Pro V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "heuristic_player",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "kimi_k26_V3",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "minimax_m2_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "MoHex",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "qwen36plus_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-best",
+      "winsA": 34,
+      "winsB": 16
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-01",
+      "winsA": 46,
+      "winsB": 4
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-01_2",
+      "winsA": 37,
+      "winsB": 13
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-03",
+      "winsA": 43,
+      "winsB": 7
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-04",
+      "winsA": 40,
+      "winsB": 10
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-05",
+      "winsA": 41,
+      "winsB": 9
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-06",
+      "winsA": 42,
+      "winsB": 8
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-07",
+      "winsA": 42,
+      "winsB": 8
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-08",
+      "winsA": 45,
+      "winsB": 5
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-10",
+      "winsA": 35,
+      "winsB": 15
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-11",
+      "winsA": 39,
+      "winsB": 11
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-12",
+      "winsA": 40,
+      "winsB": 10
+    },
+    {
+      "a": "claude_opus_4_7_xhigh_V2",
+      "b": "AZ-13",
+      "winsA": 41,
+      "winsB": 9
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "Gemini 3.1 Pro V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 31,
+      "winsB": 19
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "heuristic_player",
+      "winsA": 40,
+      "winsB": 10
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "kimi_k26_V3",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 41,
+      "winsB": 9
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "minimax_m2_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "MoHex",
+      "winsA": 38,
+      "winsB": 12
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "qwen36plus_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-best",
+      "winsA": 20,
+      "winsB": 30
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-01",
+      "winsA": 30,
+      "winsB": 20
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-01_2",
+      "winsA": 16,
+      "winsB": 34
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-03",
+      "winsA": 22,
+      "winsB": 28
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-04",
+      "winsA": 11,
+      "winsB": 39
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-05",
+      "winsA": 15,
+      "winsB": 35
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-06",
+      "winsA": 18,
+      "winsB": 32
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-07",
+      "winsA": 15,
+      "winsB": 35
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-08",
+      "winsA": 14,
+      "winsB": 36
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-10",
+      "winsA": 18,
+      "winsB": 32
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-11",
+      "winsA": 19,
+      "winsB": 31
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-12",
+      "winsA": 15,
+      "winsB": 35
+    },
+    {
+      "a": "deepseek_v4_pro_max_V3",
+      "b": "AZ-13",
+      "winsA": 23,
+      "winsB": 27
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "heuristic_player",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "kimi_k26_V3",
+      "winsA": 26,
+      "winsB": 24
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "MCTS-Light",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "minimax_m2_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "MoHex",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "qwen36plus_V2",
+      "winsA": 49,
+      "winsB": 1
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-01",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-10",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-11",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-12",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "Gemini 3.1 Pro V2",
+      "b": "AZ-13",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "heuristic_player",
+      "winsA": 33,
+      "winsB": 17
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "kimi_k26_V3",
+      "winsA": 47,
+      "winsB": 3
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 30,
+      "winsB": 20
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "minimax_m2_V2",
+      "winsA": 45,
+      "winsB": 5
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "MoHex",
+      "winsA": 38,
+      "winsB": 12
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "qwen36plus_V2",
+      "winsA": 43,
+      "winsB": 7
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-best",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-01",
+      "winsA": 41,
+      "winsB": 9
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-01_2",
+      "winsA": 17,
+      "winsB": 33
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-04",
+      "winsA": 34,
+      "winsB": 16
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-05",
+      "winsA": 42,
+      "winsB": 8
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-06",
+      "winsA": 40,
+      "winsB": 10
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-07",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-08",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-10",
+      "winsA": 5,
+      "winsB": 45
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-11",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-12",
+      "winsA": 5,
+      "winsB": 45
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-13",
+      "winsA": 32,
+      "winsB": 18
+    },
+    {
+      "a": "heuristic_player",
+      "b": "kimi_k26_V3",
+      "winsA": 19,
+      "winsB": 31
+    },
+    {
+      "a": "heuristic_player",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 17,
+      "winsB": 33
+    },
+    {
+      "a": "heuristic_player",
+      "b": "minimax_m2_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "MoHex",
+      "winsA": 27,
+      "winsB": 23
+    },
+    {
+      "a": "heuristic_player",
+      "b": "qwen36plus_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-01",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-10",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-11",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-12",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-13",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "MCTS-Light",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "minimax_m2_V2",
+      "winsA": 27,
+      "winsB": 23
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "MoHex",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "qwen36plus_V2",
+      "winsA": 44,
+      "winsB": 6
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-01",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-10",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-11",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-12",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26_V3",
+      "b": "AZ-13",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "mimo_v25_pro_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "minimax_m2_V2",
+      "winsA": 45,
+      "winsB": 5
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "MoHex",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "qwen36plus_V2",
+      "winsA": 32,
+      "winsB": 18
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-10",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-11",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-12",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-13",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "minimax_m2_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "MoHex",
+      "winsA": 22,
+      "winsB": 28
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "qwen36plus_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-best",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-01",
+      "winsA": 10,
+      "winsB": 40
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-01_2",
+      "winsA": 14,
+      "winsB": 36
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-03",
+      "winsA": 11,
+      "winsB": 39
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-04",
+      "winsA": 11,
+      "winsB": 39
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-05",
+      "winsA": 8,
+      "winsB": 42
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-06",
+      "winsA": 8,
+      "winsB": 42
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-07",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-08",
+      "winsA": 5,
+      "winsB": 45
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-10",
+      "winsA": 9,
+      "winsB": 41
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-11",
+      "winsA": 8,
+      "winsB": 42
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-12",
+      "winsA": 11,
+      "winsB": 39
+    },
+    {
+      "a": "mimo_v25_pro_V2",
+      "b": "AZ-13",
+      "winsA": 9,
+      "winsB": 41
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "MoHex",
+      "winsA": 4,
+      "winsB": 46
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "qwen36plus_V2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-10",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-11",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-12",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2_V2",
+      "b": "AZ-13",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MoHex",
+      "b": "qwen36plus_V2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-best",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-01",
+      "winsA": 12,
+      "winsB": 38
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-01_2",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-03",
+      "winsA": 11,
+      "winsB": 39
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-04",
+      "winsA": 4,
+      "winsB": 46
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-05",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-06",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-07",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-08",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-10",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-11",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-12",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-13",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-10",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-11",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-12",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus_V2",
+      "b": "AZ-13",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-01",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-01_2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-01_2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-10",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-11",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-12",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-07",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-07",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-07",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-07",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-07",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-08",
+      "b": "AZ-10",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-08",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-08",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-08",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-10",
+      "b": "AZ-11",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-10",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-10",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-11",
+      "b": "AZ-12",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-11",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-12",
+      "b": "AZ-13",
+      "winsA": 25,
+      "winsB": 25
+    }
+  ]
+}</script>
+<script>
+const data = JSON.parse(document.getElementById('ranking-data').textContent);
+
+const TYPE_COLORS = {
+    'Random': '#95a5a6',
+    'Alpha-Beta': '#3498db',
+    'Monte Carlo': '#e67e22',
+    'MCTS': '#2ecc71',
+    'Heuristique': '#9b59b6',
+    'MoHex': '#1abc9c',
+    'AlphaZero': '#e74c3c',
+    'Gemini': '#1a73e8',
+};
+
+function colorFor(name) {
+    const t = data.playerTypes[name] || 'Inconnu';
+    return TYPE_COLORS[t] || '#34495e';
+}
+
+// ── Sous-titre & stats ────────────────────────────────────────────────────
+const n = data.names.length;
+const totalMatchups = n * (n - 1) / 2;
+const totalGames = data.results.reduce((s, r) => s + r.winsA + r.winsB, 0);
+document.getElementById('subtitle').textContent =
+    `Tournoi round-robin • ${n} joueurs • ${totalMatchups} matchups • ${data.games_per_matchup} parties/matchup • ${data.sims} sims/coup • Généré le ${data.generated_at_human}`;
+
+const statsRow = document.getElementById('stats-row');
+[['Joueurs', n], ['Matchups', totalMatchups], ['Parties totales', totalGames],
+ ['Temps total', `${Math.round(data.total_time)}s`],
+ ['Sims/coup', data.sims]
+].forEach(([label, value]) => {
+    statsRow.insertAdjacentHTML('beforeend',
+        `<div class="stat-box"><div class="value">${value}</div><div class="label">${label}</div></div>`);
+});
+
+// ── Charts (barres) ───────────────────────────────────────────────────────
+const names = data.names;
+const eloData = names.map(n => data.elo[n]);
+const winData = names.map(n => data.winPct[n]);
+const timeData = names.map(n => data.avgTime[n]);
+const movesData = names.map(n => data.avgMoves[n]);
+const barColors = names.map(n => colorFor(n));
+
+const chartOpts = {
+    indexAxis: 'y',
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+        x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+        y: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 11 } } }
+    }
+};
+
+new Chart(document.getElementById('eloChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: eloData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+new Chart(document.getElementById('winChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: winData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: { ...chartOpts, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, max: 100 } } }
+});
+new Chart(document.getElementById('timeChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: timeData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+new Chart(document.getElementById('movesChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: movesData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+
+// ── Radar (4 axes normalisés 0-100) ───────────────────────────────────────
+function normalize(values, invert) {
+    const min = Math.min(...values), max = Math.max(...values);
+    const span = max - min || 1;
+    return values.map(v => {
+        const x = (v - min) / span * 100;
+        return invert ? 100 - x : x;
+    });
+}
+const eloNorm   = normalize(eloData,   false);
+const winNorm   = normalize(winData,   false);
+const timeNorm  = normalize(timeData,  true);   // moins de temps = mieux
+const movesNorm = normalize(movesData, true);   // parties courtes = mieux
+
+const radarDatasets = names.map((nm, i) => {
+    const c = colorFor(nm);
+    return {
+        label: nm,
+        data: [eloNorm[i], winNorm[i], timeNorm[i], movesNorm[i]],
+        borderColor: c,
+        backgroundColor: c + '20',
+        borderWidth: 2,
+        pointRadius: 3,
+    };
+});
+new Chart(document.getElementById('radarChart'), {
+    type: 'radar',
+    data: { labels: ['Elo', 'Win%', 'Vitesse', 'Brièveté'], datasets: radarDatasets },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'right', labels: { color: '#e0e0e0', font: { size: 11 } } } },
+        scales: {
+            r: {
+                min: 0, max: 100,
+                grid:        { color: '#2a3a4a' },
+                angleLines:  { color: '#2a3a4a' },
+                pointLabels: { color: '#00d4ff', font: { size: 13 } },
+                ticks:       { color: '#888', backdropColor: 'transparent', stepSize: 25 },
+            }
+        }
+    }
+});
+
+// ── Heatmap ───────────────────────────────────────────────────────────────
+const resultMap = {};
+data.results.forEach(r => { resultMap[r.a + '|' + r.b] = r; });
+
+const heatmapEl = document.getElementById('heatmap');
+heatmapEl.style.gridTemplateColumns = `100px repeat(${n}, 1fr)`;
+heatmapEl.innerHTML = '<div class="heatmap-header"></div>';
+names.forEach(nm => {
+    heatmapEl.innerHTML += `<div class="heatmap-header" style="writing-mode:vertical-lr;text-orientation:mixed;transform:rotate(180deg)">${nm}</div>`;
+});
+names.forEach((a, i) => {
+    heatmapEl.innerHTML += `<div class="heatmap-header">${a}</div>`;
+    names.forEach((b, j) => {
+        if (i === j) {
+            heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:#1a2634">-</div>`;
+            return;
+        }
+        let val = 0.5;
+        const fwd = resultMap[a + '|' + b];
+        const rev = resultMap[b + '|' + a];
+        if (fwd && (fwd.winsA + fwd.winsB) > 0) val = fwd.winsA / (fwd.winsA + fwd.winsB);
+        else if (rev && (rev.winsA + rev.winsB) > 0) val = rev.winsB / (rev.winsA + rev.winsB);
+        const pct = (val * 100).toFixed(0);
+        const r = Math.round(255 * (1 - val));
+        const g = Math.round(255 * val);
+        heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
+    });
+});
+
+// ── Tableau ───────────────────────────────────────────────────────────────
+let tableHTML = `<table><thead><tr>
+<th>Rang</th><th>Joueur</th><th>Modèle</th><th>Famille</th><th>Type</th><th>Elo</th>
+<th>Victoires</th><th>Parties</th><th>Win%</th>
+<th>Temps moy./coup</th><th>Coups moy./partie</th></tr></thead><tbody>`;
+names.forEach((nm, idx) => {
+    const rank = idx + 1;
+    const rankClass = rank <= 3 ? `rank-${rank}` : '';
+    const t = data.playerTypes[nm];
+    const f = data.playerFamilies[nm];
+    const c = colorFor(nm);
+    tableHTML += `<tr>
+        <td class="${rankClass}">#${rank}</td>
+        <td>${nm}</td>
+        <td>${data.playerFiles[nm] || '-'}</td>
+        <td>${f}</td>
+        <td><span class="badge" style="background:${c}20;color:${c};border:1px solid ${c}40">${t}</span></td>
+        <td>${data.elo[nm].toFixed(0)}</td>
+        <td>${data.winsTotal[nm]}</td>
+        <td>${data.gamesTotal[nm]}</td>
+        <td>${data.winPct[nm].toFixed(1)}%</td>
+        <td>${data.avgTime[nm].toFixed(3)}s</td>
+        <td>${data.avgMoves[nm].toFixed(1)}</td>
+    </tr>`;
+});
+tableHTML += '</tbody></table>';
+document.getElementById('table-wrap').innerHTML = tableHTML;
+</script>
+</body>
+</html>

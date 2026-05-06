@@ -191,6 +191,7 @@ def main():
 
     # ─── Boucle principale AlphaZero ──────────────────────────────────────────
     t_start = time.time()
+    models_accepted = 0
     for iteration in range(1, args.iterations + 1):
         print(f"\n{'='*60}")
         print(f"Itération {iteration}/{args.iterations}")
@@ -243,6 +244,7 @@ def main():
                 if win_rate >= WIN_RATE_THRESHOLD:
                     print("  ✓ Nouveau modèle accepté !")
                     save_checkpoint(net, BEST_MODEL_FILE)
+                    models_accepted += 1
                 else:
                     print("  ✗ Ancien modèle conservé.")
                     eval_passed = False
@@ -272,6 +274,7 @@ def main():
     t_total = time.time() - t_start
     print("\nEntraînement terminé.")
     print(f"Meilleur modèle : {BEST_MODEL_FILE}")
+    print(f"Modèles conservés (win rate ≥ {WIN_RATE_THRESHOLD:.0%}) : {models_accepted}/{args.iterations}")
     print(f"Durée totale : {t_total/3600:.0f}h {(t_total%3600)/60:.0f}m {t_total%60:.0f}s")
 
 

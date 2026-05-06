@@ -1,0 +1,1760 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Classement Hex 11×11 — Tournoi unifié</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1923; color: #e0e0e0; padding: 2rem; }
+  h1 { text-align: center; color: #00d4ff; margin-bottom: 0.5rem; font-size: 2rem; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .card { background: #1a2634; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #2a3a4a; padding-bottom: 0.5rem; }
+  .card.az h2 { color: #e74c3c; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #2a3a4a; font-size: 0.85rem; word-break: break-all; }
+  th { color: #00d4ff; font-weight: 600; }
+  tr:hover { background: #243447; }
+  .rank-1 { color: #ffd700; font-weight: bold; }
+  .rank-2 { color: #c0c0c0; font-weight: bold; }
+  .rank-3 { color: #cd7f32; font-weight: bold; }
+  .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .heatmap { display: grid; gap: 2px; margin-top: 1rem; overflow-x: auto; }
+  .heatmap-cell { padding: 0.4rem; text-align: center; font-size: 0.7rem; border-radius: 3px; }
+  .heatmap-header { font-weight: 600; color: #00d4ff; font-size: 0.65rem; word-break: break-all; }
+  .stats-row { display: flex; justify-content: space-around; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+  .stat-box { background: #1a2634; border-radius: 12px; padding: 1rem 1.5rem; text-align: center; min-width: 150px; }
+  .stat-box .value { font-size: 1.8rem; font-weight: bold; color: #00d4ff; }
+  .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+  canvas { max-height: 350px; }
+  .full-width { grid-column: 1 / -1; }
+  .section-title { color: #00d4ff; font-size: 1.4rem; margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #2a3a4a; }
+  .az-title { color: #e74c3c; }
+  .delta-pos { color: #2ecc71; font-weight: 600; }
+  .delta-neg { color: #e74c3c; font-weight: 600; }
+  .delta-zero { color: #888; }
+</style>
+</head>
+<body>
+<h1>Classement Hex 11×11 — Tournoi unifié</h1>
+<p id="subtitle" class="subtitle"></p>
+
+<div class="stats-row" id="stats-row"></div>
+
+<div class="grid">
+  <div class="card"><h2>Score Elo</h2><canvas id="eloChart"></canvas></div>
+  <div class="card"><h2>Taux de Victoire (%)</h2><canvas id="winChart"></canvas></div>
+  <div class="card"><h2>Temps moyen par coup (s)</h2><canvas id="timeChart"></canvas></div>
+  <div class="card"><h2>Durée moyenne des parties (coups)</h2><canvas id="movesChart"></canvas></div>
+  <div class="card full-width"><h2>Matrice des confrontations (taux de victoire ligne vs colonne)</h2><div id="heatmap" class="heatmap"></div></div>
+  <div class="card full-width"><h2>Évolution temporelle — Elo</h2><canvas id="evoElo"></canvas></div>
+  <div class="card full-width"><h2>Évolution temporelle — Win%</h2><canvas id="evoWin"></canvas></div>
+  <div class="card full-width"><h2>Classement détaillé</h2><div id="table-wrap"></div></div>
+</div>
+
+<script id="ranking-data" type="application/json">{
+  "schema_version": 2,
+  "generated_at": "2026-04-30T01:42:08",
+  "generated_at_human": "30/04/2026 à 01:42",
+  "games_per_matchup": 50,
+  "sims": 600,
+  "time_per_move": 0.5,
+  "total_time": 7324.867144107819,
+  "names": [
+    "gpt53_codex_xhigh",
+    "AZ-best",
+    "AlphaBeta",
+    "AZ-06",
+    "AZ-08",
+    "AZ-01_2",
+    "AZ-07",
+    "AZ-04",
+    "AZ-03",
+    "AZ-05",
+    "claude_opus_4_7_xhigh",
+    "AZ-01",
+    "MoHex",
+    "heuristic_player",
+    "deepseek_v4_pro_max",
+    "gemini_3_1_pro_preview",
+    "MCTS-Light",
+    "minimax_m2",
+    "qwen36plus",
+    "mimo_v25_pro",
+    "kimi_k26"
+  ],
+  "playerTypes": {
+    "AlphaBeta": "Alpha-Beta",
+    "claude_opus_4_7_xhigh": "Inconnu",
+    "deepseek_v4_pro_max": "Inconnu",
+    "gemini_3_1_pro_preview": "Inconnu",
+    "gpt53_codex_xhigh": "Inconnu",
+    "heuristic_player": "Inconnu",
+    "kimi_k26": "Inconnu",
+    "MCTS-Light": "MCTS",
+    "mimo_v25_pro": "Inconnu",
+    "minimax_m2": "Inconnu",
+    "MoHex": "MoHex",
+    "qwen36plus": "Inconnu",
+    "AZ-best": "AlphaZero",
+    "AZ-01": "AlphaZero",
+    "AZ-01_2": "AlphaZero",
+    "AZ-03": "AlphaZero",
+    "AZ-04": "AlphaZero",
+    "AZ-05": "AlphaZero",
+    "AZ-06": "AlphaZero",
+    "AZ-07": "AlphaZero",
+    "AZ-08": "AlphaZero"
+  },
+  "playerFamilies": {
+    "AlphaBeta": "classic",
+    "claude_opus_4_7_xhigh": "classic",
+    "deepseek_v4_pro_max": "classic",
+    "gemini_3_1_pro_preview": "classic",
+    "gpt53_codex_xhigh": "classic",
+    "heuristic_player": "classic",
+    "kimi_k26": "classic",
+    "MCTS-Light": "classic",
+    "mimo_v25_pro": "classic",
+    "minimax_m2": "classic",
+    "MoHex": "classic",
+    "qwen36plus": "classic",
+    "AZ-best": "alphazero",
+    "AZ-01": "alphazero",
+    "AZ-01_2": "alphazero",
+    "AZ-03": "alphazero",
+    "AZ-04": "alphazero",
+    "AZ-05": "alphazero",
+    "AZ-06": "alphazero",
+    "AZ-07": "alphazero",
+    "AZ-08": "alphazero"
+  },
+  "playerPaths": {
+    "AlphaBeta": null,
+    "claude_opus_4_7_xhigh": null,
+    "deepseek_v4_pro_max": null,
+    "gemini_3_1_pro_preview": null,
+    "gpt53_codex_xhigh": null,
+    "heuristic_player": null,
+    "kimi_k26": null,
+    "MCTS-Light": null,
+    "mimo_v25_pro": null,
+    "minimax_m2": null,
+    "MoHex": null,
+    "qwen36plus": null,
+    "AZ-best": "model/best_model.pt",
+    "AZ-01": "model/model_01_00_17_04.pt",
+    "AZ-01_2": "model/model_01_00_18_04.pt",
+    "AZ-03": "model/model_03_01_18_04.pt",
+    "AZ-04": "model/model_04_02_22_04.pt",
+    "AZ-05": "model/model_05_04_23_04.pt",
+    "AZ-06": "model/model_06_04_24_04.pt",
+    "AZ-07": "model/model_07_03_25_04.pt",
+    "AZ-08": "model/model_08_07_29_04.pt"
+  },
+  "playerFiles": {
+    "AlphaBeta": null,
+    "claude_opus_4_7_xhigh": null,
+    "deepseek_v4_pro_max": null,
+    "gemini_3_1_pro_preview": null,
+    "gpt53_codex_xhigh": null,
+    "heuristic_player": null,
+    "kimi_k26": null,
+    "MCTS-Light": null,
+    "mimo_v25_pro": null,
+    "minimax_m2": null,
+    "MoHex": null,
+    "qwen36plus": null,
+    "AZ-best": "best_model.pt",
+    "AZ-01": "model_01_00_17_04.pt",
+    "AZ-01_2": "model_01_00_18_04.pt",
+    "AZ-03": "model_03_01_18_04.pt",
+    "AZ-04": "model_04_02_22_04.pt",
+    "AZ-05": "model_05_04_23_04.pt",
+    "AZ-06": "model_06_04_24_04.pt",
+    "AZ-07": "model_07_03_25_04.pt",
+    "AZ-08": "model_08_07_29_04.pt"
+  },
+  "elo": {
+    "AlphaBeta": 1289.3608537470227,
+    "claude_opus_4_7_xhigh": 1172.021779501258,
+    "deepseek_v4_pro_max": 796.6741079980598,
+    "gemini_3_1_pro_preview": 688.9031165429097,
+    "gpt53_codex_xhigh": 1322.8651083402726,
+    "heuristic_player": 939.4413245412849,
+    "kimi_k26": 392.7039101526305,
+    "MCTS-Light": 651.5124553530242,
+    "mimo_v25_pro": 434.20446477433654,
+    "minimax_m2": 548.1412021869418,
+    "MoHex": 959.4285188103421,
+    "qwen36plus": 524.0601126009121,
+    "AZ-best": 1312.0756006429324,
+    "AZ-01": 1110.352128979024,
+    "AZ-01_2": 1271.927167199125,
+    "AZ-03": 1258.3893332020002,
+    "AZ-04": 1259.6335546270495,
+    "AZ-05": 1232.1373659999663,
+    "AZ-06": 1288.7067558020965,
+    "AZ-07": 1270.9945152956457,
+    "AZ-08": 1276.4666237031652
+  },
+  "winPct": {
+    "AlphaBeta": 75.1,
+    "claude_opus_4_7_xhigh": 65.0,
+    "deepseek_v4_pro_max": 30.9,
+    "gemini_3_1_pro_preview": 22.8,
+    "gpt53_codex_xhigh": 74.8,
+    "heuristic_player": 42.1,
+    "kimi_k26": 5.2,
+    "MCTS-Light": 20.1,
+    "mimo_v25_pro": 7.2,
+    "minimax_m2": 13.6,
+    "MoHex": 43.0,
+    "qwen36plus": 11.8,
+    "AZ-best": 77.2,
+    "AZ-01": 57.5,
+    "AZ-01_2": 72.8,
+    "AZ-03": 70.7,
+    "AZ-04": 71.4,
+    "AZ-05": 69.4,
+    "AZ-06": 73.9,
+    "AZ-07": 72.4,
+    "AZ-08": 73.1
+  },
+  "avgTime": {
+    "AlphaBeta": 0.20790477577860747,
+    "claude_opus_4_7_xhigh": 0.4221346678619521,
+    "deepseek_v4_pro_max": 0.4463059837798137,
+    "gemini_3_1_pro_preview": 0.4492862800452776,
+    "gpt53_codex_xhigh": 0.43612518185520416,
+    "heuristic_player": 0.03130395860125647,
+    "kimi_k26": 0.4762550822379913,
+    "MCTS-Light": 0.4990427134389109,
+    "mimo_v25_pro": 0.47811790441506574,
+    "minimax_m2": 0.478338547250313,
+    "MoHex": 0.48334844515717756,
+    "qwen36plus": 0.4751856390230203,
+    "AZ-best": 0.21515760008789447,
+    "AZ-01": 0.29397241993209133,
+    "AZ-01_2": 0.26970057196473807,
+    "AZ-03": 0.24151657029871784,
+    "AZ-04": 0.264104666408832,
+    "AZ-05": 0.2442049805514207,
+    "AZ-06": 0.27587243836762393,
+    "AZ-07": 0.2399657963431281,
+    "AZ-08": 0.21274954059523837
+  },
+  "avgMoves": {
+    "AlphaBeta": 29.285,
+    "claude_opus_4_7_xhigh": 45.357,
+    "deepseek_v4_pro_max": 45.887,
+    "gemini_3_1_pro_preview": 41.91,
+    "gpt53_codex_xhigh": 37.611,
+    "heuristic_player": 30.565,
+    "kimi_k26": 40.742,
+    "MCTS-Light": 42.35,
+    "mimo_v25_pro": 43.851,
+    "minimax_m2": 42.043,
+    "MoHex": 42.232,
+    "qwen36plus": 44.887,
+    "AZ-best": 28.218,
+    "AZ-01": 34.717,
+    "AZ-01_2": 29.54,
+    "AZ-03": 28.139,
+    "AZ-04": 26.99,
+    "AZ-05": 27.37,
+    "AZ-06": 27.015,
+    "AZ-07": 27.042,
+    "AZ-08": 26.897
+  },
+  "winsTotal": {
+    "AlphaBeta": 751,
+    "claude_opus_4_7_xhigh": 650,
+    "deepseek_v4_pro_max": 309,
+    "gemini_3_1_pro_preview": 228,
+    "gpt53_codex_xhigh": 748,
+    "heuristic_player": 421,
+    "kimi_k26": 52,
+    "MCTS-Light": 201,
+    "mimo_v25_pro": 72,
+    "minimax_m2": 136,
+    "MoHex": 430,
+    "qwen36plus": 118,
+    "AZ-best": 772,
+    "AZ-01": 575,
+    "AZ-01_2": 728,
+    "AZ-03": 707,
+    "AZ-04": 714,
+    "AZ-05": 694,
+    "AZ-06": 739,
+    "AZ-07": 724,
+    "AZ-08": 731
+  },
+  "gamesTotal": {
+    "AlphaBeta": 1000,
+    "claude_opus_4_7_xhigh": 1000,
+    "deepseek_v4_pro_max": 1000,
+    "gemini_3_1_pro_preview": 1000,
+    "gpt53_codex_xhigh": 1000,
+    "heuristic_player": 1000,
+    "kimi_k26": 1000,
+    "MCTS-Light": 1000,
+    "mimo_v25_pro": 1000,
+    "minimax_m2": 1000,
+    "MoHex": 1000,
+    "qwen36plus": 1000,
+    "AZ-best": 1000,
+    "AZ-01": 1000,
+    "AZ-01_2": 1000,
+    "AZ-03": 1000,
+    "AZ-04": 1000,
+    "AZ-05": 1000,
+    "AZ-06": 1000,
+    "AZ-07": 1000,
+    "AZ-08": 1000
+  },
+  "results": [
+    {
+      "a": "AlphaBeta",
+      "b": "claude_opus_4_7_xhigh",
+      "winsA": 24,
+      "winsB": 26
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "deepseek_v4_pro_max",
+      "winsA": 49,
+      "winsB": 1
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "gemini_3_1_pro_preview",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 29,
+      "winsB": 21
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "heuristic_player",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "kimi_k26",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "mimo_v25_pro",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "minimax_m2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "MoHex",
+      "winsA": 49,
+      "winsB": 1
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "qwen36plus",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-best",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-01",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-01_2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-03",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AlphaBeta",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "deepseek_v4_pro_max",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "gemini_3_1_pro_preview",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 38,
+      "winsB": 12
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "heuristic_player",
+      "winsA": 49,
+      "winsB": 1
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "kimi_k26",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "mimo_v25_pro",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "minimax_m2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "MoHex",
+      "winsA": 48,
+      "winsB": 2
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "qwen36plus",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-best",
+      "winsA": 15,
+      "winsB": 35
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-01",
+      "winsA": 19,
+      "winsB": 31
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-01_2",
+      "winsA": 23,
+      "winsB": 27
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-03",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-04",
+      "winsA": 23,
+      "winsB": 27
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-05",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-06",
+      "winsA": 14,
+      "winsB": 36
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-07",
+      "winsA": 20,
+      "winsB": 30
+    },
+    {
+      "a": "claude_opus_4_7_xhigh",
+      "b": "AZ-08",
+      "winsA": 12,
+      "winsB": 38
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "gemini_3_1_pro_preview",
+      "winsA": 32,
+      "winsB": 18
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 12,
+      "winsB": 38
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "heuristic_player",
+      "winsA": 24,
+      "winsB": 26
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "kimi_k26",
+      "winsA": 43,
+      "winsB": 7
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "MCTS-Light",
+      "winsA": 36,
+      "winsB": 14
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "mimo_v25_pro",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "minimax_m2",
+      "winsA": 41,
+      "winsB": 9
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "MoHex",
+      "winsA": 14,
+      "winsB": 36
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "qwen36plus",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-01",
+      "winsA": 3,
+      "winsB": 47
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-03",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-05",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "deepseek_v4_pro_max",
+      "b": "AZ-08",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "gpt53_codex_xhigh",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "heuristic_player",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "kimi_k26",
+      "winsA": 47,
+      "winsB": 3
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "MCTS-Light",
+      "winsA": 30,
+      "winsB": 20
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "mimo_v25_pro",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "minimax_m2",
+      "winsA": 30,
+      "winsB": 20
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "MoHex",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "qwen36plus",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gemini_3_1_pro_preview",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "heuristic_player",
+      "winsA": 33,
+      "winsB": 17
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "kimi_k26",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "mimo_v25_pro",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "minimax_m2",
+      "winsA": 49,
+      "winsB": 1
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "MoHex",
+      "winsA": 38,
+      "winsB": 12
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "qwen36plus",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-best",
+      "winsA": 9,
+      "winsB": 41
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-01",
+      "winsA": 41,
+      "winsB": 9
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-01_2",
+      "winsA": 17,
+      "winsB": 33
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-04",
+      "winsA": 34,
+      "winsB": 16
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-05",
+      "winsA": 42,
+      "winsB": 8
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-06",
+      "winsA": 40,
+      "winsB": 10
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-07",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "gpt53_codex_xhigh",
+      "b": "AZ-08",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "kimi_k26",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "MCTS-Light",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "mimo_v25_pro",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "minimax_m2",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "MoHex",
+      "winsA": 27,
+      "winsB": 23
+    },
+    {
+      "a": "heuristic_player",
+      "b": "qwen36plus",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-01",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "heuristic_player",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "MCTS-Light",
+      "winsA": 9,
+      "winsB": 41
+    },
+    {
+      "a": "kimi_k26",
+      "b": "mimo_v25_pro",
+      "winsA": 5,
+      "winsB": 45
+    },
+    {
+      "a": "kimi_k26",
+      "b": "minimax_m2",
+      "winsA": 19,
+      "winsB": 31
+    },
+    {
+      "a": "kimi_k26",
+      "b": "MoHex",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "kimi_k26",
+      "b": "qwen36plus",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "kimi_k26",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "mimo_v25_pro",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "minimax_m2",
+      "winsA": 27,
+      "winsB": 23
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "MoHex",
+      "winsA": 1,
+      "winsB": 49
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "qwen36plus",
+      "winsA": 48,
+      "winsB": 2
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MCTS-Light",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "minimax_m2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "MoHex",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "qwen36plus",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "mimo_v25_pro",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "MoHex",
+      "winsA": 2,
+      "winsB": 48
+    },
+    {
+      "a": "minimax_m2",
+      "b": "qwen36plus",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "minimax_m2",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "MoHex",
+      "b": "qwen36plus",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-best",
+      "winsA": 4,
+      "winsB": 46
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-01",
+      "winsA": 12,
+      "winsB": 38
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-01_2",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-03",
+      "winsA": 11,
+      "winsB": 39
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-04",
+      "winsA": 4,
+      "winsB": 46
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-05",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-06",
+      "winsA": 7,
+      "winsB": 43
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-07",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "MoHex",
+      "b": "AZ-08",
+      "winsA": 6,
+      "winsB": 44
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-best",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-01",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-01_2",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-04",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-05",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "qwen36plus",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-01",
+      "winsA": 50,
+      "winsB": 0
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-01_2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-best",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-01_2",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-03",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-07",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01",
+      "b": "AZ-08",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-03",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-01_2",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-04",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-03",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-05",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-06",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-04",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-06",
+      "winsA": 0,
+      "winsB": 50
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-05",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-07",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-06",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    },
+    {
+      "a": "AZ-07",
+      "b": "AZ-08",
+      "winsA": 25,
+      "winsB": 25
+    }
+  ]
+}</script>
+<script>
+const data = JSON.parse(document.getElementById('ranking-data').textContent);
+
+const TYPE_COLORS = {
+    'Random': '#95a5a6',
+    'Alpha-Beta': '#3498db',
+    'Monte Carlo': '#e67e22',
+    'MCTS': '#2ecc71',
+    'Heuristique': '#9b59b6',
+    'MoHex': '#1abc9c',
+    'AlphaZero': '#e74c3c',
+};
+
+function colorFor(name) {
+    const t = data.playerTypes[name] || 'Inconnu';
+    return TYPE_COLORS[t] || '#34495e';
+}
+
+// ── Sous-titre & stats ────────────────────────────────────────────────────
+const n = data.names.length;
+const totalMatchups = n * (n - 1) / 2;
+const totalGames = data.results.reduce((s, r) => s + r.winsA + r.winsB, 0);
+const runsCount = data.runs ? data.runs.length : 1;
+document.getElementById('subtitle').textContent =
+    `Tournoi round-robin • ${n} joueurs • ${totalMatchups} matchups • ${data.games_per_matchup} parties/matchup • ${data.sims} sims/coup • ${runsCount} runs • Généré le ${data.generated_at_human}`;
+
+const statsRow = document.getElementById('stats-row');
+[['Joueurs', n], ['Matchups', totalMatchups], ['Parties totales', totalGames],
+ ['Runs', runsCount], ['Temps total', `${Math.round(data.total_time)}s`],
+ ['Sims/coup', data.sims]
+].forEach(([label, value]) => {
+    statsRow.insertAdjacentHTML('beforeend',
+        `<div class="stat-box"><div class="value">${value}</div><div class="label">${label}</div></div>`);
+});
+
+// ── Charts (barres) ───────────────────────────────────────────────────────
+const names = data.names;
+const eloData = names.map(n => data.elo[n]);
+const winData = names.map(n => data.winPct[n]);
+const timeData = names.map(n => data.avgTime[n]);
+const movesData = names.map(n => data.avgMoves[n]);
+const barColors = names.map(n => colorFor(n));
+
+const chartOpts = {
+    indexAxis: 'y',
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+        x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+        y: { grid: { display: false }, ticks: { color: '#e0e0e0', font: { size: 11 } } }
+    }
+};
+
+new Chart(document.getElementById('eloChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: eloData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+new Chart(document.getElementById('winChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: winData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: { ...chartOpts, scales: { ...chartOpts.scales, x: { ...chartOpts.scales.x, max: 100 } } }
+});
+new Chart(document.getElementById('timeChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: timeData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+new Chart(document.getElementById('movesChart'), {
+    type: 'bar',
+    data: { labels: names, datasets: [{ data: movesData, backgroundColor: barColors, borderRadius: 6 }] },
+    options: chartOpts
+});
+
+// ── Heatmap ───────────────────────────────────────────────────────────────
+const resultMap = {};
+data.results.forEach(r => { resultMap[r.a + '|' + r.b] = r; });
+
+const heatmapEl = document.getElementById('heatmap');
+heatmapEl.style.gridTemplateColumns = `100px repeat(${n}, 1fr)`;
+heatmapEl.innerHTML = '<div class="heatmap-header"></div>';
+names.forEach(nm => {
+    heatmapEl.innerHTML += `<div class="heatmap-header" style="writing-mode:vertical-lr;text-orientation:mixed;transform:rotate(180deg)">${nm}</div>`;
+});
+names.forEach((a, i) => {
+    heatmapEl.innerHTML += `<div class="heatmap-header">${a}</div>`;
+    names.forEach((b, j) => {
+        if (i === j) {
+            heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:#1a2634">-</div>`;
+            return;
+        }
+        let val = 0.5;
+        const fwd = resultMap[a + '|' + b];
+        const rev = resultMap[b + '|' + a];
+        if (fwd && (fwd.winsA + fwd.winsB) > 0) val = fwd.winsA / (fwd.winsA + fwd.winsB);
+        else if (rev && (rev.winsA + rev.winsB) > 0) val = rev.winsB / (rev.winsA + rev.winsB);
+        const pct = (val * 100).toFixed(0);
+        const r = Math.round(255 * (1 - val));
+        const g = Math.round(255 * val);
+        heatmapEl.innerHTML += `<div class="heatmap-cell" style="background:rgb(${r},${g},80);color:${val > 0.5 ? '#000' : '#fff'}">${pct}%</div>`;
+    });
+});
+
+// ── Évolution temporelle (courbes) ────────────────────────────────────────
+if (data.runs && data.runs.length > 1) {
+    const evoLabels = data.runs.map(r => r.date);
+    const evoDates = data.runs.map(r => r.fullDate);
+
+    function buildEvoSeries(metric, allNames) {
+        return allNames.map(name => {
+            const color = colorFor(name);
+            return {
+                label: name,
+                data: data.runs.map(r => r[metric][name] !== undefined ? r[metric][name] : null),
+                borderColor: color,
+                backgroundColor: color + '33',
+                tension: 0.25,
+                spanGaps: true,
+                pointRadius: 4,
+                borderWidth: 2
+            };
+        });
+    }
+
+    const evoOpts = {
+        responsive: true,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+            legend: { labels: { color: '#e0e0e0', boxWidth: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { title: (items) => evoDates[items[0].dataIndex] } }
+        },
+        scales: {
+            x: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } },
+            y: { grid: { color: '#2a3a4a' }, ticks: { color: '#aaa' } }
+        }
+    };
+
+    new Chart(document.getElementById('evoElo'), {
+        type: 'line',
+        data: { labels: evoLabels, datasets: buildEvoSeries('elo', data.allNames) },
+        options: evoOpts
+    });
+    new Chart(document.getElementById('evoWin'), {
+        type: 'line',
+        data: { labels: evoLabels, datasets: buildEvoSeries('win', data.allNames) },
+        options: { ...evoOpts, scales: { ...evoOpts.scales, y: { ...evoOpts.scales.y, max: 100 } } }
+    });
+}
+
+// ── Tableau ───────────────────────────────────────────────────────────────
+let tableHTML = `<table><thead><tr>
+<th>Rang</th><th>Joueur</th><th>Modèle</th><th>Famille</th><th>Type</th><th>Elo</th>
+<th>Victoires</th><th>Parties</th><th>Win%</th>
+<th>Temps moy./coup</th><th>Coups moy./partie</th></tr></thead><tbody>`;
+names.forEach((nm, idx) => {
+    const rank = idx + 1;
+    const rankClass = rank <= 3 ? `rank-${rank}` : '';
+    const t = data.playerTypes[nm];
+    const f = data.playerFamilies[nm];
+    const c = colorFor(nm);
+    tableHTML += `<tr>
+        <td class="${rankClass}">#${rank}</td>
+        <td>${nm}</td>
+        <td>${data.playerFiles[nm] || '-'}</td>
+        <td>${f}</td>
+        <td><span class="badge" style="background:${c}20;color:${c};border:1px solid ${c}40">${t}</span></td>
+        <td>${data.elo[nm].toFixed(0)}</td>
+        <td>${data.winsTotal[nm]}</td>
+        <td>${data.gamesTotal[nm]}</td>
+        <td>${data.winPct[nm].toFixed(1)}%</td>
+        <td>${data.avgTime[nm].toFixed(3)}s</td>
+        <td>${data.avgMoves[nm].toFixed(1)}</td>
+    </tr>`;
+});
+tableHTML += '</tbody></table>';
+document.getElementById('table-wrap').innerHTML = tableHTML;
+</script>
+</body>
+</html>

@@ -28,7 +28,8 @@ import re
 import time
 
 _dir = os.path.dirname(os.path.abspath(__file__))
-for _p in [os.path.join(_dir, 'ia'), os.path.join(_dir, 'train')]:
+for _p in [os.path.join(_dir, 'ia'), os.path.join(_dir, 'train'),
+           os.path.join(_dir, 'ia', 'non_utiliser')]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -352,6 +353,33 @@ def _resolve_ai(name: str, time_s: float):
     if n == 'mohex':
         from mohex import MoHexPlayer
         return MoHexPlayer(), 'MoHex'
+    if n in ('deepseek', 'deepseek_v4_pro_max', 'deepseek_v4_pro_max_v2', 'deepseek_v4_pro_max_v3'):
+        from deepseek_v4_pro_max_V3 import DeepSeekV4ProMax
+        return DeepSeekV4ProMax(), 'DeepSeekV4ProMaxV3'
+    if n in ('claude', 'claude_opus', 'claude_opus_4_7'):
+        from claude_opus_4_7_xhigh_V2 import ClaudeOpus47Xhigh
+        return ClaudeOpus47Xhigh(), 'ClaudeOpus47Xhigh'
+    if n in ('gemini', 'gemini_3_1_pro', 'gemini31', 'gemini_3_1_pro_preview', 'gemini_3_1_pro_preview_v2'):
+        from gemini_3_1_pro_preview_V2 import Gemini31ProPreviewV2
+        return Gemini31ProPreviewV2(), 'Gemini31ProPreviewV2'
+    if n in ('gpt53', 'gpt53_codex', 'codex', 'gpt53_codex_xhigh'):
+        from gpt53_codex_xhigh import GPT53CodexXhigh
+        return GPT53CodexXhigh(), 'GPT53CodexXhigh'
+    if n in ('katahex', 'kata'):
+        from katahex import KataHexPlayer
+        return KataHexPlayer(), 'KataHex'
+    if n in ('kimi', 'kimi_k26', 'kimi_k26_v3'):
+        from kimi_k26_V3 import KimiK26
+        return KimiK26(), 'KimiK26V3'
+    if n in ('mimo', 'mimo_v25', 'mimo_v25_pro', 'mimo_v25_pro_v2'):
+        from mimo_v25_pro_V2 import MimoV25Pro
+        return MimoV25Pro(), 'MimoV25ProV2'
+    if n in ('minimax', 'minimax_m2', 'minimax_m2_v2'):
+        from minimax_m2_V2 import MiniMaxM2
+        return MiniMaxM2(), 'MiniMaxM2V2'
+    if n in ('qwen', 'qwen36', 'qwen36plus', 'qwen36plus_v2'):
+        from qwen36plus_V2 import Qwen36Plus
+        return Qwen36Plus(), 'Qwen36PlusV2'
     if n in ('humain', 'human'):
         from humain import HumanPlayer
         return HumanPlayer(), 'Humain'
@@ -366,12 +394,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+    _ia_list = ("'alphabeta','random','alphazero','mc_pure','mcts_light',"
+                "'heuristic','mohex','deepseek','claude','gemini','gpt53',"
+                "'katahex','kimi','mimo','minimax','qwen','humain'")
     parser.add_argument('ai1',
-        help=("IA 1 : 'alphabeta', 'random', 'alphazero', 'mc_pure', "
-              "'mcts_light', 'heuristic', 'mohex', 'humain', ou commande externe"))
+        help=f"IA 1 : {_ia_list}, ou commande externe")
     parser.add_argument('ai2',
-        help=("IA 2 : 'alphabeta', 'random', 'alphazero', 'mc_pure', "
-              "'mcts_light', 'heuristic', 'mohex', ou commande externe"))
+        help=f"IA 2 : {_ia_list}, ou commande externe")
     parser.add_argument('games', nargs='?', type=int, default=20,
         help="Nombre de parties (défaut: 20)")
     parser.add_argument('-v', '--verbose', action='store_true',

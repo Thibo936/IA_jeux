@@ -4,75 +4,92 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Hex 11×11 AI playground (Paris 8 L3). Six pure-Python players: Alpha-Beta, AlphaZero MCTS, light MCTS (UCT, no net), pure Monte Carlo, BFS heuristic, random. No build step — `pip install torch numpy numba`.
+AlphaZero-style trainer + benchmarking harness for Hex 11×11 (Paris 8 L3 project). Pure Python (PyTorch, numpy, numba). Six native AI families plus AlphaZero variants and several "LLM" players (one Python file per LLM-generated agent).
 
-Code, comments, and CLI output are written in **French** — match that style when editing.
+Board convention: Blue (`O`) connects North→South; Red (`@`) connects West→East. Cells are indexed row-major `0..120`, alphanumeric notation `A1..K11`.
+
+## Important: scripts run from `alphazero/`
+
+All Python entry points (`tournament.py`, `ranking.py`, `versus.py`, `play.py`, `train/trainer.py`) bootstrap their `sys.path` by computing `__file__`'s directory and inserting `alphazero/`, `alphazero/ia/`, and `alphazero/train/`. **Always `cd alphazero/` before running them** — relative checkpoint paths (`checkpoints/best_model.pt`, `model/`) are resolved against CWD.
 
 ## Common commands
 
-All scripts must be run from `alphazero/`.
-
 ```bash
-# Tournament between two players (keywords: alphabeta, random, alphazero, mc_pure, mcts_light, heuristic)
+cd alphazero
+
+# Self-play training (AlphaZero loop)
+python train/trainer.py --iterations 100 --games 100 --simulations 800 --device cuda
+python train/trainer.py --iterations 1 --games 10 --simulations 100        # smoke test
+python train/trainer.py --iterations 20 --games 50 --no-eval               # skip eval
+
+# Two-player tournament (CLI mnemonics resolved in tournament._resolve_ai)
 python tournament.py alphabeta random 20
-python tournament.py alphabeta alphazero 10 -v -t 2.0     # -v verbose, -t seconds/move
-python tournament.py alphabeta ./external_binary 20       # any non-keyword is treated as an external subprocess
+python tournament.py alphabeta alphazero 10 -v -t 2.0
+python tournament.py alphabeta ./external_binary 20 -t 1.5                 # external = subprocess
 
-# Unified ranking (incremental — only missing matchups are replayed; writes rank/ranking.{csv,html})
-python ranking.py --games 20
-python ranking.py --mode classic --games 20
-python ranking.py --mode alphazero --games 20
+# Round-robin ranking → rank/ranking.html (CSV is incremental)
+python ranking.py --games 50
+python ranking.py --mode classic           # only non-AZ
+python ranking.py --mode alphazero         # only AZ models
+python ranking.py --add path/to/model.pt   # add an extra checkpoint
 
-# AlphaZero training
-python train/trainer.py --iterations 1 --games 10 --simulations 100                          # smoke test (CPU)
-python train/trainer.py --iterations 100 --games 100 --simulations 800 --steps 500 --device cuda
-python train/trainer.py --iterations 20 --games 50 --simulations 200 --no-eval
+# Two-AZ duel (just for picking between checkpoints)
+python versus.py best checkpoints/model_iter_10.pt 20 -s 400
 
-# Targeted checks
-python train/evaluate.py                                                     # win rate vs random
-python train/network.py                                                      # mini training-loss sanity check
-python -c "from train.hex_env import HexEnv; print(HexEnv().get_state_tensor().shape)"  # → (3, 11, 11)
+# Single-move CLI used by tournament for external/Python AIs (BOARD/PLAYER protocol)
+python play.py "<121-char board>" O 1.5
+python ia/alphabeta.py "<121-char board>" @ 1.0
 
-# Housekeeping
-make clean                                                                   # purge __pycache__ / *.pyc
+# Engine smoke checks
+python -c "from train.hex_env import HexEnv; print(HexEnv().get_state_tensor().shape)"   # → (3,11,11)
+python train/network.py    # PASS if loss decreases
+python train/evaluate.py   # win rate vs random
+
+# Cleanup pyc / __pycache__
+make clean
 ```
 
-`train_colab.ipynb` (repo root) is the Colab counterpart of `trainer.py` with FP16 + multi-process self-play.
-
-## Per-AI CLI protocol
-
-Every player in `ia/` is also a standalone CLI: `python <ia>.py BOARD PLAYER [time_s]`.
-- `BOARD`: 121 row-major chars, `.` empty, `O` Blue (N→S), `@` Red (W→E)
-- stdout: move in `A1`..`K11` notation; stderr: search stats
-
-Example (empty board): `python ia/alphabeta.py "$(python -c 'print("."*121)')" O`
+There is no test suite or linter configured — `network.py`/`evaluate.py` `__main__` blocks are the closest thing to smoke tests.
 
 ## Architecture
 
-### Game engine — `train/hex_env.py` (single source of truth)
-Two `bool` 11×11 numpy arrays (`blue`, `red`). Win check via BFS flood-fill. `get_state_tensor()` returns a `(3, 11, 11)` float32 tensor (Blue plane, Red plane, current-player plane). `mirror()` provides the diagonal-reflection symmetry used for data augmentation. `apply_move`/`undo_move` enable in-place search (Alpha-Beta uses undo, MCTS uses copy).
+### Engine, network, search
 
-### Player interface — `ia/`
-Each Python player exposes `select_move(env: HexEnv, time_s: float) -> int` and writes per-move diagnostics to `self.last_stats`. `tournament.py` and `ranking.py` consume that contract.
+- **`alphazero/train/hex_env.py`** — `HexEnv` is the single source of truth for game state. Two `bool (11,11)` numpy arrays (`blue`, `red`) plus `blue_to_play`. Win detection is BFS flood-fill. `mirror()` exposes the diagonal symmetry used for data augmentation. **Mutating API (`apply_move`, `undo_move`)** is used everywhere for speed — never assume a player's `select_move` left `env` untouched without inspecting it; the convention is "do not mutate" but it is enforced only by code review.
+- **`alphazero/train/network.py`** — `HexNet`: 3-channel input (Blue plane, Red plane, side-to-move plane) → conv stem → `NUM_RES_BLOCKS` residual blocks → policy head (`log_softmax` over 121 cells) + value head (`tanh`).
+- **`alphazero/ia/mcts_az.py`** — `MCTSAgent` / `MCTSNode`: PUCT search with batched GPU inference (16 leaves per forward), root Dirichlet noise (only in self-play, gated by `add_dirichlet`), FP16 autocast on CUDA. `get_policy(env, move_count, return_root=True)` is the canonical entry point used by `play.py`, `versus.py`, and the `AlphaZeroPlayer` wrapper in `tournament.py`.
+- **`alphazero/train/self_play.py`** — Parallel self-play (`N_PARALLEL_GAMES` games stepped together, `LEAVES_PER_GAME` leaves per GPU round). Produces `(state, policy_target, value_target)` examples; `ReplayBuffer` is a circular `deque`-based buffer.
+- **`alphazero/train/trainer.py`** — Outer loop. Per iteration: self-play → train N steps (Adam + cosine schedule) → eval new vs current best → swap if win rate ≥ `WIN_RATE_THRESHOLD` (0.55, see `config.py`) over `EVAL_GAMES`. On accept it copies `checkpoints/best_model.pt` to `model/` via `model_naming.copy_best_to_model`.
+- **`alphazero/train/config.py`** — All hyperparameters live here (board size, MCTS sims, training steps, win-rate threshold, paths). Treat as the central tuning surface.
 
-- **`alphabeta.py`** — Numba-JITted BFS 0-1 heuristic (`Red_path − Blue_path`). Adaptive depth based on legal-move count; Zobrist transposition table; killer moves + history heuristic; root-level move ordering. Exports `AlphaBetaPlayer` and `eval_heuristic()`.
-- **`mcts_az.py`** — UCB-PUCT (`c_puct=1.0`), Dirichlet root noise (α=0.03, ε=0.25) in self-play, τ=1 for first 20 plies then argmax, virtual-loss batched GPU inference (~16–32 leaves/batch), tree reuse between moves, FP16 autocast.
-- **`mcts_light.py`** — UCT, no network. **`monte_carlo_pure.py`** — random rollouts, no tree. **`heuristic_player.py`** — greedy via shortest virtual path. **`random_player.py`** — uniform.
-- **`play.py`** (alphazero root) — CLI wrapper that loads `checkpoints/best_model.pt` and scales simulation count to the time budget.
+### Player protocol (every `ia/*.py`)
 
-### AlphaZero pipeline — `train/`
-- **`network.py`** — ResNet (~6 blocks × 128 filters in current code; double-check before claiming a count) with policy + value heads, `predict()` / `batch_predict()`, FP16 via `torch.amp.autocast` on CUDA.
-- **`self_play.py`** — `GameSlot` per game; `run_self_play` runs ~8 games concurrently and cross-batches positions (~64) into a single GPU forward. Circular replay buffer (~150k positions). See `train/self_play.txt` for design notes.
-- **`trainer.py`** — self-play → train → evaluate loop. Loss = `MSE(v,z) + CE(p,π) + λ·L2` (λ=1e-4). Adam lr=1e-3 with cosine annealing to 1e-5. A new model replaces `best_model.pt` only at ≥55% win rate over the eval games. **When evaluation rejects a model, the optimizer + scheduler are reset** alongside the revert to `best_model.pt` — preserve that behavior when refactoring.
-- **`evaluate.py`** — pairwise model comparison + vs-random baseline.
+Every player file in `ia/` exposes both:
+1. A Python class with `select_move(env: HexEnv, time_s: float) -> int` and a `last_stats: dict` attribute (used by `tournament.py` for verbose stats).
+2. A `__main__` CLI implementing `python <file>.py BOARD PLAYER [time_s]` where `BOARD` is 121 chars (`.`/`O`/`@`), with the chosen move on stdout (`A1`..`K11`) and stats on stderr (`SCORE:.. NODES:.. DEPTH:..` for alpha-beta-style, `ITERS:.. VISITS:.. WINRATE:.. TIME:..` for MCTS-style). The CLI form is what lets `tournament.py` drive arbitrary external programs through `subprocess`.
 
-### Tournament & ranking
-- `tournament.py` — head-to-head; alternates colors each game; accepts external subprocess opponents.
-- `ranking.py` — round-robin across all classic + AZ variants. The CSV in `rank/ranking.csv` is **incremental**: re-runs only fill missing matchups, so don't blow it away unless you intend a fresh leaderboard. HTML report regenerated each run.
-- `model_naming.py` — names accepted models `model_<num>_<parent>_<DD>_<MM>.pt` and copies them into `model/`. `model_rank/` is a read-only archive.
+A full how-to-add-a-player guide lives at `alphazero/ia/non_utiliser/add_model.md`. The non-obvious part: every new player must be registered in **two places** — `tournament._resolve_ai` (mnemonic → instance + display name) and **five sections** of `ranking.py` (`DEFAULT_CLASSICS`, `CLASSIC_DISPLAY`, `CLASSIC_TYPE`, `CLASSIC_COLORS`, `_make_classic`).
 
-## Operational notes
+### Model storage and naming
 
-- **Architecture changes invalidate checkpoints.** If you change `network.py` (block count, filters, head shape), delete `checkpoints/best_model.pt`, `checkpoints/model_iter_*.pt`, and `checkpoints/replay_buffer.npz` before training, otherwise loading will fail or silently mis-shape.
-- ROCm users on RX 6600 / gfx1032: `export HSA_OVERRIDE_GFX_VERSION=10.3.0`. Pass `--device cuda` (PyTorch ROCm uses the CUDA backend names).
-- Color convention: Blue = `O` plays N→S, Red = `@` plays W→E. Never swap silently — many heuristics encode the orientation.
+Two parallel locations:
+- **`alphazero/checkpoints/`** — live training output: `best_model.pt`, `model_iter_*.pt`, `replay_buffer.npz`. Overwritten each iteration.
+- **`alphazero/model/`** — accepted-models archive. When the trainer accepts a new best, it copies `best_model.pt` here as `model_<NN>_<PP>_<DD>_<MM>.pt` (sequential num, parent num, day, month). `model_naming.py` is the canonical parser/builder/scanner — never hand-roll filenames; use `model_naming.next_model_number`, `build_model_name`, `copy_best_to_model`.
+
+`ranking.py` auto-discovers everything in `model/` plus `checkpoints/best_model.pt` and labels them `AZ-NN` / `AZ-best` in the leaderboard.
+
+### Ranking is incremental
+
+`alphazero/rank/ranking.csv` is the source of truth; `ranking.py` only plays missing matchups, then regenerates a timestamped HTML report. To force replay, edit/clear the relevant rows in `rank/ranking.csv` (do not delete checkpoints just to retrigger games).
+
+### LLM-authored players (`alphazero/ia/*_V*.py`)
+
+Files like `claude_opus_4_7_xhigh_V2.py`, `deepseek_v4_pro_max_V3.py`, `gemini_3_1_pro_preview_V2.py`, etc. are fully self-contained Python AIs generated by various LLMs as a benchmark exercise. They follow the same `select_move`/CLI protocol as native players. The unversioned originals live in `alphazero/model_LLM/` (do not edit those — they are the "as-submitted" snapshots). The numbered `_V2`/`_V3` variants under `ia/` are the ones registered for tournaments.
+
+## Conventions worth respecting
+
+- **No `cd` inside Python.** Use the `_dir = os.path.dirname(os.path.abspath(__file__))` + `sys.path.insert` pattern that every existing entry point uses.
+- **Always check the immediate-winning move** before running any expensive search (every native player does — see the pattern in `add_model.md` §5).
+- **Mutate-and-undo over copy** is the performance idiom for tree search (`env.apply_move(m)` / `env.undo_move(m, was_blue)`).
+- The codebase, comments, and CLI help are in **French**. Match the surrounding language when editing.
+- ROCm AMD users: `export HSA_OVERRIDE_GFX_VERSION=10.3.0` for RX 6600 (gfx1032); still pass `--device cuda` to PyTorch.

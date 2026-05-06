@@ -1,0 +1,5 @@
+  Pour model_07_03_25_04.pt :                                                                                                                                                                                                         
+  - 07 → num : numéro séquentiel du modèle (le 7ᵉ)                                                                                                                                                                                    
+  - 03 → parent : numéro du modèle parent dont il est issu (ici le modèle #03, donc model_03_01_18_04.pt)                                                                                                                             
+  - 25 → day : jour de création (25)                                                                                                                                                                                                
+  - 04 → month : mois de création (avril)
