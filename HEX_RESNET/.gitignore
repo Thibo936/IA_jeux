@@ -36,3 +36,10 @@ alphazero/checkpoints/replay_buffer.npz
 # OS
 .DS_Store
 Thumbs.db
+
+CLAUDE.md
+amelioration.md
+DOCUMENTATION.md
+model_iter_*
+
+rank_old/

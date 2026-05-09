@@ -58,8 +58,17 @@ CLASSIC_DISPLAY = {
     'mcts_light': 'MCTS-Light',
     'mcts':       'MCTS-Light',
     'heuristic':  'Heuristic',
+    'heuristic_player': 'Heuristic',
     'mohex':      'MoHex',
+    'claude_opus_4_7_xhigh_v2': 'claude_opus_4_7_xhigh_V2',
+    'deepseek_v4_pro_max_v3': 'deepseek_v4_pro_max_V3',
     'gemini_3_1_pro_preview_v2': 'Gemini 3.1 Pro V2',
+    'gpt53_codex_xhigh': 'gpt53_codex_xhigh',
+    'gpt55_xhigh': 'gpt55_xhigh',
+    'kimi_k26_v3': 'kimi_k26_V3',
+    'mimo_v25_pro_v2': 'mimo_v25_pro_V2',
+    'minimax_m2_v2': 'minimax_m2_V2',
+    'qwen36plus_v2': 'qwen36plus_V2',
 }
 
 CLASSIC_TYPE = {
@@ -70,8 +79,17 @@ CLASSIC_TYPE = {
     'mcts_light': 'MCTS',
     'mcts':       'MCTS',
     'heuristic':  'Heuristique',
+    'heuristic_player': 'Heuristique',
     'mohex':      'MoHex',
+    'claude_opus_4_7_xhigh_v2': 'LLM',
+    'deepseek_v4_pro_max_v3': 'LLM',
     'gemini_3_1_pro_preview_v2': 'Gemini',
+    'gpt53_codex_xhigh': 'LLM',
+    'gpt55_xhigh': 'LLM',
+    'kimi_k26_v3': 'LLM',
+    'mimo_v25_pro_v2': 'LLM',
+    'minimax_m2_v2': 'LLM',
+    'qwen36plus_v2': 'LLM',
 }
 
 CLASSIC_COLORS = {
@@ -82,11 +100,19 @@ CLASSIC_COLORS = {
     'Heuristique': '#9b59b6',
     'MoHex':       '#1abc9c',
     'Gemini':      '#1a73e8',
+    'LLM':         '#f39c12',
     'Inconnu':     '#34495e',
 }
 
 TIME_PER_MOVE = 0.5
 _STDERR_SINK = open(os.devnull, 'w')
+CSV_FIELDS = [
+    'run_timestamp', 'name_a', 'name_b',
+    'game_index', 'a_is_blue',
+    'winner_name', 'total_moves', 'total_time',
+    'avg_time_blue', 'avg_time_red',
+    'sims', 'time_per_move',
+]
 
 
 # ─── Inférence type/famille (compatibilité legacy) ──────────────────────────
@@ -564,6 +590,7 @@ const TYPE_COLORS = {
     'MoHex': '#1abc9c',
     'AlphaZero': '#e74c3c',
     'Gemini': '#1a73e8',
+    'LLM': '#f39c12',
 };
 
 function colorFor(name) {
@@ -739,6 +766,79 @@ def generate_html_report(payload: dict, output_path: str) -> None:
     print(f"Rapport HTML : {output_path}")
 
 
+def _format_duration(seconds: float) -> str:
+    """Format court pour les durées de progression."""
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m{s:02d}s"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
+
+def _read_existing_matchups(csv_path: str) -> tuple[dict[tuple[str, str], dict], int]:
+    """Lit le CSV incrémental, avec compatibilité pour les anciens CSV sans en-tête."""
+    existing_matchups: dict[tuple[str, str], dict] = {}
+    if not os.path.isfile(csv_path):
+        return existing_matchups, 0
+
+    skipped = 0
+    rows_read = 0
+    with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+        sample = f.readline()
+        f.seek(0)
+        has_header = sample.startswith('run_timestamp,name_a,name_b,')
+        if has_header:
+            rows_iter = csv.DictReader(f)
+        else:
+            rows_iter = (dict(zip(CSV_FIELDS, row)) for row in csv.reader(f))
+
+        for r in rows_iter:
+            if not r:
+                continue
+            try:
+                na, nb = r['name_a'], r['name_b']
+                a_is_blue = int(r['a_is_blue'])
+                winner_name = r['winner_name']
+                avg_time_blue = float(r['avg_time_blue'])
+                avg_time_red = float(r['avg_time_red'])
+                total_moves = int(r['total_moves'])
+            except (KeyError, TypeError, ValueError):
+                skipped += 1
+                continue
+
+            key = (na, nb)
+            if key not in existing_matchups:
+                existing_matchups[key] = {
+                    'wins_a': 0, 'wins_b': 0, 'games': 0,
+                    'sum_time_a': 0.0, 'sum_time_b': 0.0, 'sum_moves': 0,
+                }
+            m = existing_matchups[key]
+            m['games'] += 1
+            if winner_name == na:
+                m['wins_a'] += 1
+            else:
+                m['wins_b'] += 1
+            if a_is_blue:
+                m['sum_time_a'] += avg_time_blue
+                m['sum_time_b'] += avg_time_red
+            else:
+                m['sum_time_a'] += avg_time_red
+                m['sum_time_b'] += avg_time_blue
+            m['sum_moves'] += total_moves
+            rows_read += 1
+
+    if not sample.startswith('run_timestamp,name_a,name_b,'):
+        print("WARN : CSV sans en-tête détecté, lecture en mode compatibilité.",
+              file=sys.stderr)
+    if skipped:
+        print(f"WARN : {skipped} lignes CSV ignorées (format invalide).",
+              file=sys.stderr)
+    return existing_matchups, rows_read
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -844,35 +944,12 @@ def main():
     )
 
     # 3. Lecture CSV incrémental
-    existing_matchups: dict[tuple[str, str], dict] = {}
     if os.path.isfile(csv_path):
-        with open(csv_path, 'r', newline='', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for r in reader:
-                na, nb = r['name_a'], r['name_b']
-                key = (na, nb)
-                if key not in existing_matchups:
-                    existing_matchups[key] = {
-                        'wins_a': 0, 'wins_b': 0, 'games': 0,
-                        'sum_time_a': 0.0, 'sum_time_b': 0.0, 'sum_moves': 0,
-                    }
-                m = existing_matchups[key]
-                m['games'] += 1
-                if r['winner_name'] == na:
-                    m['wins_a'] += 1
-                else:
-                    m['wins_b'] += 1
-                a_is_blue = int(r['a_is_blue'])
-                if a_is_blue:
-                    m['sum_time_a'] += float(r['avg_time_blue'])
-                    m['sum_time_b'] += float(r['avg_time_red'])
-                else:
-                    m['sum_time_a'] += float(r['avg_time_red'])
-                    m['sum_time_b'] += float(r['avg_time_blue'])
-                m['sum_moves'] += int(r['total_moves'])
-        print(f"CSV existant : {sum(m['games'] for m in existing_matchups.values())} lignes, "
+        existing_matchups, csv_rows = _read_existing_matchups(csv_path)
+        print(f"CSV existant : {csv_rows} lignes, "
               f"{len(existing_matchups)} matchups déjà joués.")
     else:
+        existing_matchups = {}
         print("Aucun CSV existant, tournoi complet.")
 
     total_games_to_play = 0
@@ -897,17 +974,11 @@ def main():
     csv_file = None
     csv_writer = None
     if not args.no_csv:
-        csv_is_new = not os.path.isfile(csv_path)
+        csv_is_new = (not os.path.isfile(csv_path)) or os.path.getsize(csv_path) == 0
         csv_file = open(csv_path, 'a', newline='', encoding='utf-8')
         csv_writer = csv.writer(csv_file)
         if csv_is_new:
-            csv_writer.writerow([
-                'run_timestamp', 'name_a', 'name_b',
-                'game_index', 'a_is_blue',
-                'winner_name', 'total_moves', 'total_time',
-                'avg_time_blue', 'avg_time_red',
-                'sims', 'time_per_move',
-            ])
+            csv_writer.writerow(CSV_FIELDS)
 
     # 4a. Partition : skip immédiat des matchups déjà complets ; les autres sont
     # rangés par profil de charge (CPU pur, mixte CPU/GPU, GPU pur).
@@ -954,9 +1025,11 @@ def main():
     # 4b. Callback central — exécuté dans le main thread via as_completed,
     # donc pas besoin de lock pour l'écriture CSV ni pour les accumulateurs.
     done_count = [0]
+    games_done = [0]
 
     def _on_match_done(na: str, nb: str, missing: int, existing: dict, mr: dict) -> None:
         done_count[0] += 1
+        games_done[0] += missing
         if csv_writer is not None:
             for g in mr['games']:
                 csv_writer.writerow([
@@ -982,8 +1055,24 @@ def main():
         moves_total[na] += existing['sum_moves'] + mr['avg_moves'] * missing
         moves_total[nb] += existing['sum_moves'] + mr['avg_moves'] * missing
 
-        print(f"  [{done_count[0]}/{total_todo}] "
-              f"{na} {total_wins_a}-{total_wins_b} {nb}", flush=True)
+        elapsed = time.time() - t_start
+        games_remaining = max(0, total_games_to_play - games_done[0])
+        matchups_remaining = max(0, total_todo - done_count[0])
+        games_per_second = games_done[0] / elapsed if elapsed > 0 else 0.0
+        eta = games_remaining / games_per_second if games_per_second > 0 else 0.0
+        active = min(matchups_remaining, cpu_workers + gpu_workers)
+
+        print(
+            f"  [{done_count[0]}/{total_todo}] "
+            f"{na} {total_wins_a}-{total_wins_b} {nb} | "
+            f"parties {games_done[0]}/{total_games_to_play} "
+            f"(reste {games_remaining}) | "
+            f"matchups reste {matchups_remaining}, actifs~{active} | "
+            f"{games_per_second:.2f} parties/s | "
+            f"écoulé {_format_duration(elapsed)} | "
+            f"ETA {_format_duration(eta)}",
+            flush=True,
+        )
 
     # 4c. Exécution parallèle des matchups CPU-only et AZ/mixte.
     todo_cpu.sort(key=lambda x: x[2], reverse=True)
