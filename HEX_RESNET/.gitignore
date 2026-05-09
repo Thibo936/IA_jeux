@@ -32,6 +32,7 @@ alphazero/checkpoints/replay_buffer.npz
 
 # Logs
 *.log
+*.logs
 
 # OS
 .DS_Store
@@ -43,3 +44,6 @@ DOCUMENTATION.md
 model_iter_*
 
 rank_old/
+amelioration.md
+CLAUDE.md
+AGENT.md
